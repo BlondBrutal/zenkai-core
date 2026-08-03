@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <clipPath id="roundedSquare"><rect x="0" y="0" width="256" height="256" rx="38" ry="38" /></clipPath>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#roundedSquare)"><rect x="0" y="0" width="256" height="256" fill="#000000" /></g>
+  <rect x="5" y="5" width="246" height="246" rx="34" ry="34" fill="none" stroke="#17B897" stroke-width="6" />
+
+  <g clip-path="url(#roundedSquare)">
+    <text x="141.00" y="177.00" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#001512" text-anchor="middle">ZK</text>
+    <text x="140.64" y="176.64" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#011A16" text-anchor="middle">ZK</text>
+    <text x="140.28" y="176.28" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#011E19" text-anchor="middle">ZK</text>
+    <text x="139.92" y="175.92" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#02231D" text-anchor="middle">ZK</text>
+    <text x="139.56" y="175.56" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#032721" text-anchor="middle">ZK</text>
+    <text x="139.19" y="175.19" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#032C24" text-anchor="middle">ZK</text>
+    <text x="138.83" y="174.83" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#043028" text-anchor="middle">ZK</text>
+    <text x="138.47" y="174.47" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#04352C" text-anchor="middle">ZK</text>
+    <text x="138.11" y="174.11" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#053930" text-anchor="middle">ZK</text>
+    <text x="137.75" y="173.75" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#063E33" text-anchor="middle">ZK</text>
+    <text x="137.39" y="173.39" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#064237" text-anchor="middle">ZK</text>
+    <text x="137.03" y="173.03" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#07473B" text-anchor="middle">ZK</text>
+    <text x="136.67" y="172.67" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#084B3E" text-anchor="middle">ZK</text>
+    <text x="136.31" y="172.31" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#085042" text-anchor="middle">ZK</text>
+    <text x="135.94" y="171.94" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#095446" text-anchor="middle">ZK</text>
+    <text x="135.58" y="171.58" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0A5949" text-anchor="middle">ZK</text>
+    <text x="135.22" y="171.22" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0A5D4D" text-anchor="middle">ZK</text>
+    <text x="134.86" y="170.86" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0B6251" text-anchor="middle">ZK</text>
+    <text x="134.50" y="170.50" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0C6654" text-anchor="middle">ZK</text>
+    <text x="134.14" y="170.14" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0C6B58" text-anchor="middle">ZK</text>
+    <text x="133.78" y="169.78" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0D705C" text-anchor="middle">ZK</text>
+    <text x="133.42" y="169.42" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0D7460" text-anchor="middle">ZK</text>
+    <text x="133.06" y="169.06" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0E7963" text-anchor="middle">ZK</text>
+    <text x="132.69" y="168.69" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0F7D67" text-anchor="middle">ZK</text>
+    <text x="132.33" y="168.33" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#0F826B" text-anchor="middle">ZK</text>
+    <text x="131.97" y="167.97" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#10866E" text-anchor="middle">ZK</text>
+    <text x="131.61" y="167.61" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#118B72" text-anchor="middle">ZK</text>
+    <text x="131.25" y="167.25" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#118F76" text-anchor="middle">ZK</text>
+    <text x="130.89" y="166.89" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#129479" text-anchor="middle">ZK</text>
+    <text x="130.53" y="166.53" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#13987D" text-anchor="middle">ZK</text>
+    <text x="130.17" y="166.17" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#139D81" text-anchor="middle">ZK</text>
+    <text x="129.81" y="165.81" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#14A185" text-anchor="middle">ZK</text>
+    <text x="129.44" y="165.44" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#14A688" text-anchor="middle">ZK</text>
+    <text x="129.08" y="165.08" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#15AA8C" text-anchor="middle">ZK</text>
+    <text x="128.72" y="164.72" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#16AF90" text-anchor="middle">ZK</text>
+    <text x="128.36" y="164.36" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#16B393" text-anchor="middle">ZK</text>
+    <text x="126.60" y="162.60" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#B9FFF0" text-anchor="middle" opacity="0.9">ZK</text>
+    <text x="128" y="164" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="118" fill="#17B897" stroke="#000000" stroke-width="3" paint-order="stroke fill" text-anchor="middle" filter="url(#glow)">ZK</text>
+  </g>
+</svg>

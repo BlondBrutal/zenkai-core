@@ -1,0 +1,134 @@
+"""
+Monitoring des performances en direct (CPU, RAM, GPU, disque). Tourne dans
+un QThread séparé, rafraîchissement ~3x/seconde (CPU/RAM/disque) tant que
+la page Performance est affichée et activée.
+
+Le GPU est interrogé moins souvent que le reste : GPUtil relance un vrai
+sous-processus nvidia-smi.exe à chaque appel (voir _read_gpu_load), donc le
+faire 3x/seconde serait tout sauf léger. On le rafraîchit à ~1x/seconde en
+réutilisant la dernière valeur connue entre-temps.
+"""
+import logging
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+import psutil
+from PyQt6.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger("zenkaiontop.performance")
+
+_SAMPLE_INTERVAL_SECONDS = 0.3  # ~3.3 Hz : réactif sans polling agressif
+_GPU_QUERY_EVERY_N_TICKS = round(1.0 / _SAMPLE_INTERVAL_SECONDS)  # ~1x/seconde
+_ROLLING_WINDOW = round(8 / _SAMPLE_INTERVAL_SECONDS)  # ~8 secondes de moyenne glissante
+
+
+@dataclass
+class LiveSample:
+    cpu_percent: float
+    ram_percent: float
+    ram_used_gb: float
+    ram_total_gb: float
+    gpu_percent: Optional[float]  # None si aucun GPU compatible (GPUtil = NVIDIA uniquement)
+    gpu_available: bool
+    disk_read_mbps: float
+    disk_write_mbps: float
+
+
+class LiveMonitorThread(QThread):
+    sample_ready = pyqtSignal(object)  # LiveSample
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._running = False
+        self._recent_samples: list[LiveSample] = []
+
+    def run(self) -> None:
+        self._running = True
+        # Premier appel cpu_percent() : toujours 0.0, sert juste à amorcer la mesure suivante.
+        psutil.cpu_percent(interval=None)
+        last_io = _safe_disk_io_counters()
+        last_time = time.monotonic()
+        gpu_percent, gpu_available = _read_gpu_load()
+        tick = 0
+
+        while self._running:
+            time.sleep(_SAMPLE_INTERVAL_SECONDS)
+            if not self._running:
+                break
+
+            now = time.monotonic()
+            elapsed = max(now - last_time, 0.001)
+
+            cpu_percent = psutil.cpu_percent(interval=None)
+            vm = psutil.virtual_memory()
+
+            current_io = _safe_disk_io_counters()
+            read_mbps = write_mbps = 0.0
+            if current_io is not None and last_io is not None:
+                read_mbps = (current_io.read_bytes - last_io.read_bytes) / elapsed / 1024**2
+                write_mbps = (current_io.write_bytes - last_io.write_bytes) / elapsed / 1024**2
+            last_io = current_io
+            last_time = now
+
+            tick += 1
+            if tick % _GPU_QUERY_EVERY_N_TICKS == 0:
+                gpu_percent, gpu_available = _read_gpu_load()
+
+            sample = LiveSample(
+                cpu_percent=round(cpu_percent, 1),
+                ram_percent=round(vm.percent, 1),
+                ram_used_gb=round(vm.used / 1024**3, 1),
+                ram_total_gb=round(vm.total / 1024**3, 1),
+                gpu_percent=gpu_percent,
+                gpu_available=gpu_available,
+                disk_read_mbps=round(max(read_mbps, 0.0), 1),
+                disk_write_mbps=round(max(write_mbps, 0.0), 1),
+            )
+            self._recent_samples.append(sample)
+            if len(self._recent_samples) > _ROLLING_WINDOW:
+                self._recent_samples.pop(0)
+
+            self.sample_ready.emit(sample)
+
+    def stop(self) -> None:
+        self._running = False
+
+    def average_sample(self) -> Optional[LiveSample]:
+        """Moyenne glissante des dernières secondes, utilisée par le scan de
+        diagnostic pour évaluer le composant limitant sur une base stable
+        plutôt qu'un instantané qui peut être bruité."""
+        if not self._recent_samples:
+            return None
+        n = len(self._recent_samples)
+        gpu_values = [s.gpu_percent for s in self._recent_samples if s.gpu_percent is not None]
+        return LiveSample(
+            cpu_percent=round(sum(s.cpu_percent for s in self._recent_samples) / n, 1),
+            ram_percent=round(sum(s.ram_percent for s in self._recent_samples) / n, 1),
+            ram_used_gb=self._recent_samples[-1].ram_used_gb,
+            ram_total_gb=self._recent_samples[-1].ram_total_gb,
+            gpu_percent=round(sum(gpu_values) / len(gpu_values), 1) if gpu_values else None,
+            gpu_available=self._recent_samples[-1].gpu_available,
+            disk_read_mbps=round(sum(s.disk_read_mbps for s in self._recent_samples) / n, 1),
+            disk_write_mbps=round(sum(s.disk_write_mbps for s in self._recent_samples) / n, 1),
+        )
+
+
+def _safe_disk_io_counters():
+    try:
+        return psutil.disk_io_counters()
+    except Exception as exc:
+        logger.warning("disk_io_counters indisponible (%s)", exc)
+        return None
+
+
+def _read_gpu_load() -> tuple[Optional[float], bool]:
+    try:
+        import GPUtil
+        gpus = GPUtil.getGPUs()
+        if not gpus:
+            return None, False
+        return round(gpus[0].load * 100, 1), True
+    except Exception as exc:
+        logger.warning("GPUtil indisponible (%s)", exc)
+        return None, False

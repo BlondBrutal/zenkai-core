@@ -1,0 +1,13 @@
+{
+  "name": "1",
+  "x": 1701,
+  "y": 534,
+  "target_color": [
+    255,
+    255,
+    255
+  ],
+  "tolerance": 0,
+  "key": "z",
+  "type": "pixel"
+}

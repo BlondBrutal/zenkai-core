@@ -1,0 +1,472 @@
+/* Zenkai Core — thème sombre neutre, accent turquoise */
+
+* {
+    font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter", sans-serif;
+}
+
+QMainWindow, QWidget#centralWidget {
+    background-color: #1A1A1F;
+}
+
+/* Tooltip Qt sobre (badges "?", etc.) : texte gris standard sur fond
+   discret, pas d'encadré coloré ni d'accent — un tooltip normal, rien de plus. */
+QToolTip {
+    background-color: #26262E;
+    color: #C7CBD3;
+    border: 1px solid #33333C;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* --- Sidebar --- */
+QWidget#sidebar {
+    background-color: #17171C;
+    border-right: 1px solid #2A2A32;
+}
+
+QPushButton.navButton {
+    text-align: left;
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    color: #C7CBD3;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton.navButton:hover {
+    background-color: #232329;
+    color: #17B897;
+}
+
+QPushButton.navButton:checked {
+    background-color: transparent;
+    color: #17B897;
+}
+
+QPushButton#settingsButton {
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    color: #8A8F98;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    padding: 10px 14px;
+}
+
+QPushButton#settingsButton:hover {
+    color: #17B897;
+    background-color: #232329;
+}
+
+/* --- Contenu principal --- */
+QWidget#contentArea {
+    background-color: #1A1A1F;
+}
+
+QLabel.pageTitle {
+    font-size: 22px;
+    font-weight: 700;
+    color: #E7E9EE;
+}
+
+QLabel.pageSubtitle {
+    font-size: 13px;
+    color: #9BA1AB;
+}
+
+/* --- Boutons génériques --- */
+QPushButton.primaryButton {
+    background-color: #17B897;
+    color: #0E1C19;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QPushButton.primaryButton:hover {
+    background-color: #1BDAB3;
+}
+
+QPushButton.primaryButton:pressed {
+    background-color: #129076;
+}
+
+QPushButton.secondaryButton {
+    background-color: #202027;
+    color: #17B897;
+    border: 1px solid #33333C;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton.secondaryButton:hover {
+    background-color: #26262E;
+}
+
+/* Style discret pour les actions secondaires (ex: boutons "Définir" des
+   touches de macro) : pas d'accent turquoise, juste un contour gris fin,
+   pour ne pas rivaliser visuellement avec les vraies actions principales. */
+QPushButton.neutralButton {
+    background-color: #202027;
+    color: #9BA1AB;
+    border: 1px solid #33333C;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton.neutralButton:hover {
+    border: 1px solid #45454F;
+    background-color: #26262E;
+}
+
+/* Variante de .neutralButton pour KeyCaptureWidget (champ "Activer") : ce
+   widget a une hauteur FIXE (32px, voir _FIELD_HEIGHT dans
+   macro_simple_tab.py/macro_pixel_tab.py), alors que le padding vertical
+   généreux de .neutralButton (10px 10px) est pensé pour un bouton qui peut
+   grandir librement — combiné à une hauteur figée, il ne laissait plus assez
+   de place verticalement au texte, tronquant le haut des lettres (un "G"
+   capturé ressemblait par ex. à un "a"). Padding vertical réduit ici,
+   horizontal inchangé. */
+QPushButton.hotkeyCaptureButton {
+    background-color: #202027;
+    color: #9BA1AB;
+    border: 1px solid #33333C;
+    border-radius: 10px;
+    padding: 4px 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QPushButton.hotkeyCaptureButton:hover {
+    border: 1px solid #45454F;
+    background-color: #26262E;
+}
+
+/* Variante compacte de .neutralButton pour une touche capturée DANS une
+   cellule de tableau (séquence Macro Simple) : le padding généreux (10px
+   18px) pensé pour un bouton autonome ne laisse presque plus de place au
+   texte dans une colonne étroite — ce padding réduit règle ça. */
+QPushButton.tableCellButton {
+    background-color: #202027;
+    color: #9BA1AB;
+    border: 1px solid #33333C;
+    border-radius: 6px;
+    padding: 2px 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QPushButton.tableCellButton:hover {
+    border: 1px solid #45454F;
+    background-color: #26262E;
+}
+
+/* Même correctif que QSpinBox:focus (voir plus bas) : sans outline:none,
+   ActionCaptureWidget (bouton "Définir" d'une cellule Action) garde le cadre
+   de focus natif bleu du système une fois cliqué. */
+QPushButton.tableCellButton:focus {
+    border: 1px solid #17B897;
+    outline: none;
+}
+
+/* --- Champs --- */
+QLineEdit {
+    border: 1px solid #33333C;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background-color: #202027;
+    color: #E7E9EE;
+    font-size: 13px;
+}
+
+/* Sans ça, le texte sélectionné dans un QLineEdit (ou l'éditeur interne d'un
+   QSpinBox) retombe sur la couleur d'accentuation système par défaut
+   (souvent bleu vif sous Windows) — jamais stylée nulle part ailleurs dans
+   ce fichier, contrairement à la sélection de ligne d'un QTableWidget. */
+QLineEdit, QSpinBox {
+    selection-background-color: #17B897;
+    selection-color: #0E1C19;
+}
+
+/* QLineEdit garde son bordure neutre au focus (pas d'accent turquoise
+   voyant). */
+QLineEdit:focus {
+    border: 1px solid #33333C;
+    outline: none;
+}
+
+QSpinBox {
+    border: 1px solid #33333C;
+    border-radius: 8px;
+    padding: 6px 8px;
+    background-color: #202027;
+    color: #E7E9EE;
+    font-size: 13px;
+}
+
+/* outline: none ici aussi (comme QLineEdit:focus) : sans ça, un QSpinBox
+   focus (ex: en cliquant dans une cellule X/Y/Appui/Délai du tableau
+   d'étapes) garde le cadre de focus natif dessiné par le style Windows dans
+   la couleur d'accentuation système (bleu), par-dessus/à côté de la bordure
+   turquoise déjà stylée ci-dessous — les deux propriétés sont indépendantes
+   dans Qt, `border` seul ne suffit pas à supprimer ce cadre natif. */
+QSpinBox:focus {
+    border: 1px solid #17B897;
+    outline: none;
+}
+
+/* Variante compacte de QSpinBox pour les colonnes X/Appui/Délai du tableau
+   d'étapes (Macro Simple) : même idée que QPushButton.tableCellButton
+   ci-dessus — le padding horizontal généreux (8px) pensé pour un champ
+   autonome ne laisse pas assez de place à "-10000"/"600000" dans une
+   colonne étroite. Hérite background/couleur/bordure de la règle QSpinBox
+   de base ci-dessus (non répétés ici), ne change que padding/taille de
+   police. */
+QSpinBox.tableCellSpin {
+    padding: 6px 4px;
+    font-size: 12px;
+}
+
+/* --- Tableau (séquence d'étapes, Macro Simple) --- */
+/* Le cadre arrondi vit sur QFrame.tableCard (le conteneur autour de la
+   table, voir macro_simple_tab.py), PAS sur QTableWidget lui-même : le
+   QHeaderView peint son propre coin carré par-dessus, exactement là où le
+   coin de la table devrait s'arrondir, donnant un rendu "coupé" au coin
+   supérieur gauche (chevauchement header/coin arrondi, un classique Qt avec
+   QAbstractScrollArea). En reportant l'arrondi sur un cadre englobant avec
+   une petite marge intérieure (le tableau reste carré à l'intérieur), le
+   coin carré de l'en-tête ne coïncide plus jamais avec le coin arrondi du
+   cadre — les deux couleurs de fond étant identiques, la fine marge entre
+   les deux est invisible. */
+QTableWidget {
+    background-color: #202027;
+    border: none;
+    color: #E7E9EE;
+    font-size: 12.5px;
+    outline: none;
+}
+
+QFrame.tableCard {
+    background-color: #202027;
+    border: 1px solid #33333C;
+    border-radius: 8px;
+}
+
+QTableWidget::item {
+    border: none;
+    padding: 2px 6px;
+}
+
+/* Pas de fond au clic/sélection (transparent explicite, pas juste omis) :
+   sans ça, Qt retombe sur QPalette.Highlight (turquoise plein, voir
+   main.py) pour peindre le fond de la ligne sélectionnée — exactement ce
+   qu'on ne veut plus ici. Couleur de texte inchangée par rapport à l'état
+   normal : la ligne cliquée garde son fond de cellule habituel, rien ne la
+   distingue visuellement des autres. */
+QTableWidget::item:selected {
+    background-color: transparent;
+    color: #E7E9EE;
+}
+
+/* Le tableau des étapes (Macro Simple) n'a AUCUN QTableWidgetItem réel
+   (chaque cellule est occupée par un widget via setCellWidget) : Qt garde
+   quand même un "index courant" pour la navigation clavier et dessine un
+   cadre de focus autour de la cellule cliquée avec la couleur d'accent
+   système (bleu, jamais choisie par cette appli) — `outline: none` seul sur
+   QTableWidget ne suffit pas à le supprimer dans tous les cas, il faut aussi
+   viser explicitement l'état :focus de l'item. */
+QTableWidget::item:focus {
+    outline: none;
+    border: none;
+}
+
+/* padding horizontal réduit (8px -> 4px) : seul consommateur de
+   QHeaderView dans l'appli (le tableau d'étapes de Macro Simple), colonnes
+   resserrées pour tenir dans la largeur du panneau (voir macro_simple_tab.py,
+   _build_table) — le padding généreux d'origine ne laissait plus assez de
+   place à des en-têtes comme "Actuelle"/"Délai (ms)" dans leur colonne. */
+QHeaderView::section {
+    background-color: #17171C;
+    color: #9BA1AB;
+    padding: 6px 4px;
+    border: none;
+    border-bottom: 1px solid #33333C;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* La bande d'en-tête va jusqu'aux bords du cadre englobant sans marge (voir
+   _build_table_container dans macro_simple_tab.py) : ses deux coins hauts
+   doivent donc porter eux-mêmes un rayon assorti à QFrame.tableCard (8px),
+   sinon leur coin carré déborderait de la courbe du cadre. */
+QHeaderView::section:first {
+    border-top-left-radius: 8px;
+}
+
+QHeaderView::section:last {
+    border-top-right-radius: 8px;
+}
+
+QTableCornerButton::section {
+    background-color: #17171C;
+    border: none;
+}
+
+/* --- Slider (tolérance de couleur, macros Pixel) --- */
+QSlider::groove:horizontal {
+    background-color: #202027;
+    height: 6px;
+    border-radius: 3px;
+}
+
+QSlider::sub-page:horizontal {
+    background-color: #17B897;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background-color: #17B897;
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    border-radius: 8px;
+}
+
+QSlider::handle:horizontal:hover {
+    background-color: #1BDAB3;
+}
+
+/* --- Liste (Bibliothèque de macros) --- */
+QListWidget {
+    background-color: #1A1A1F;
+    border: 1px solid #2A2A32;
+    border-radius: 8px;
+    color: #E7E9EE;
+    font-size: 12px;
+    outline: none;
+}
+
+QListWidget::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+}
+
+QListWidget::item:hover {
+    background-color: #232329;
+}
+
+QListWidget::item:selected {
+    background-color: rgba(23, 184, 151, 40);
+    color: #17B897;
+}
+
+/* --- Barres de progression (jauges Performance, scan) --- */
+QProgressBar {
+    background-color: #202027;
+    border: 1px solid #2A2A32;
+    border-radius: 6px;
+    text-align: center;
+    color: #E7E9EE;
+    font-size: 11px;
+    min-height: 14px;
+    max-height: 14px;
+}
+
+QProgressBar::chunk {
+    background-color: #17B897;
+    border-radius: 6px;
+}
+
+/* --- Cartes (diagnostic, etc.) --- */
+QFrame.card {
+    background-color: #1F1F25;
+    border: 1px solid #2A2A32;
+    border-radius: 14px;
+}
+
+/* Scrollbars : la RoundedScrollBarStyle (ui/scrollbar_style.py, QProxyStyle)
+   gère le cas général, mais elle n'intercepte que pixelMetric/subControlRect/
+   drawComplexControl — pas drawPrimitive, que Fusion utilise séparément pour
+   dessiner les flèches haut/bas dans certains contextes (visible : de petits
+   crochets/flèches gris par défaut qui persistaient malgré la suppression
+   des boutons via subControlRect). Ce QSS, complet sur tous les
+   sous-contrôles, prend le dessus partout où il s'applique et élimine ces
+   résidus, sans dépendre de la profondeur d'imbrication (QStackedWidget) qui
+   a déjà causé d'autres soucis de rendu ponctuels avec la seule approche
+   QProxyStyle (voir le tableau de Macro Simple). Couleurs/épaisseur alignées
+   sur scrollbar_style.py pour un rendu identique. */
+QScrollBar:vertical {
+    background: #26262E;
+    width: 10px;
+    margin: 0px;
+    border: none;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background: #17B897;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #1BDAB3;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+    background: none;
+    border: none;
+}
+
+/* La piste (zone de la rainure hors du thumb) doit peindre sa propre
+   couleur explicitement : "background: none" ici la rendait transparente
+   (le fond du widget parent, souvent quasi identique en teinte, apparaissait
+   à la place — donnant l'impression qu'il n'y avait "pas de piste" du tout,
+   juste le thumb flottant dans le vide). */
+/* border-radius répété ici (pas juste sur QScrollBar:vertical) : add-page/
+   sub-page sont des rectangles de remplissage séparés du cadre englobant —
+   sans leur propre rayon, ils gardent un coin carré au bout de la piste
+   opposé au thumb, quel que soit le border-radius déjà posé sur le cadre. */
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background-color: #26262E;
+    border-radius: 5px;
+}
+
+QScrollBar:horizontal {
+    background: #26262E;
+    height: 10px;
+    margin: 0px;
+    border: none;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #17B897;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #1BDAB3;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+    background: none;
+    border: none;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background-color: #26262E;
+    border-radius: 5px;
+}
