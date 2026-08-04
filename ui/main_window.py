@@ -13,7 +13,6 @@ from ui.pages.page_license import LicensePage
 from ui.pages.page_macro import MacroPage
 from ui.pages.page_cursor import CursorPage
 from ui.pages.page_performance import PerformancePage
-from ui.pages.page_risk import RiskPage
 from ui.pages.page_fastflags import FastFlagsPage
 from ui.pages.page_settings import SettingsPage
 
@@ -79,7 +78,6 @@ class MainWindow(QMainWindow):
         self.pages.update({
             "license": LicensePage(),
             "performance": PerformancePage(),
-            "risk": RiskPage(),
             "macro": MacroPage(),
             "cursor": CursorPage(),
             "fastflags": FastFlagsPage(),

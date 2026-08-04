@@ -33,6 +33,10 @@ class LiveSample:
     gpu_available: bool
     disk_read_mbps: float
     disk_write_mbps: float
+    net_download_kbps: float
+    net_upload_kbps: float
+    battery_percent: Optional[float]  # None si aucune batterie détectée (PC de bureau)
+    battery_available: bool
 
 
 class LiveMonitorThread(QThread):
@@ -48,6 +52,7 @@ class LiveMonitorThread(QThread):
         # Premier appel cpu_percent() : toujours 0.0, sert juste à amorcer la mesure suivante.
         psutil.cpu_percent(interval=None)
         last_io = _safe_disk_io_counters()
+        last_net = _safe_net_io_counters()
         last_time = time.monotonic()
         gpu_percent, gpu_available = _read_gpu_load()
         tick = 0
@@ -69,11 +74,23 @@ class LiveMonitorThread(QThread):
                 read_mbps = (current_io.read_bytes - last_io.read_bytes) / elapsed / 1024**2
                 write_mbps = (current_io.write_bytes - last_io.write_bytes) / elapsed / 1024**2
             last_io = current_io
+
+            current_net = _safe_net_io_counters()
+            download_kbps = upload_kbps = 0.0
+            if current_net is not None and last_net is not None:
+                download_kbps = (current_net.bytes_recv - last_net.bytes_recv) / elapsed / 1024
+                upload_kbps = (current_net.bytes_sent - last_net.bytes_sent) / elapsed / 1024
+            last_net = current_net
             last_time = now
 
             tick += 1
             if tick % _GPU_QUERY_EVERY_N_TICKS == 0:
                 gpu_percent, gpu_available = _read_gpu_load()
+
+            # Lecture directe (pas de restriction de fréquence type GPU) :
+            # psutil.sensors_battery() est un simple appel WMI/registre quasi
+            # instantané, pas un sous-processus relancé à chaque fois.
+            battery_percent, battery_available = _read_battery()
 
             sample = LiveSample(
                 cpu_percent=round(cpu_percent, 1),
@@ -84,6 +101,10 @@ class LiveMonitorThread(QThread):
                 gpu_available=gpu_available,
                 disk_read_mbps=round(max(read_mbps, 0.0), 1),
                 disk_write_mbps=round(max(write_mbps, 0.0), 1),
+                net_download_kbps=round(max(download_kbps, 0.0), 1),
+                net_upload_kbps=round(max(upload_kbps, 0.0), 1),
+                battery_percent=battery_percent,
+                battery_available=battery_available,
             )
             self._recent_samples.append(sample)
             if len(self._recent_samples) > _ROLLING_WINDOW:
@@ -111,6 +132,10 @@ class LiveMonitorThread(QThread):
             gpu_available=self._recent_samples[-1].gpu_available,
             disk_read_mbps=round(sum(s.disk_read_mbps for s in self._recent_samples) / n, 1),
             disk_write_mbps=round(sum(s.disk_write_mbps for s in self._recent_samples) / n, 1),
+            net_download_kbps=round(sum(s.net_download_kbps for s in self._recent_samples) / n, 1),
+            net_upload_kbps=round(sum(s.net_upload_kbps for s in self._recent_samples) / n, 1),
+            battery_percent=self._recent_samples[-1].battery_percent,
+            battery_available=self._recent_samples[-1].battery_available,
         )
 
 
@@ -120,6 +145,25 @@ def _safe_disk_io_counters():
     except Exception as exc:
         logger.warning("disk_io_counters indisponible (%s)", exc)
         return None
+
+
+def _safe_net_io_counters():
+    try:
+        return psutil.net_io_counters()
+    except Exception as exc:
+        logger.warning("net_io_counters indisponible (%s)", exc)
+        return None
+
+
+def _read_battery() -> tuple[Optional[float], bool]:
+    try:
+        battery = psutil.sensors_battery()
+        if battery is None:
+            return None, False
+        return round(battery.percent, 1), True
+    except Exception as exc:
+        logger.warning("sensors_battery indisponible (%s)", exc)
+        return None, False
 
 
 def _read_gpu_load() -> tuple[Optional[float], bool]:

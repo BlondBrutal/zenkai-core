@@ -1,20 +1,24 @@
 """
-Page Risque : estimation heuristique du risque de bannissement (Partie 6 du
-brief). CE N'EST PAS une mesure garantie ni un chiffre officiel Roblox —
+Contenu "Risque" : estimation heuristique du risque de bannissement (Partie 6
+du brief). CE N'EST PAS une mesure garantie ni un chiffre officiel Roblox —
 juste une estimation interne basée sur les réglages actuels, présentée
 comme telle partout dans l'UI (jamais comme un fait certain).
+
+Vit maintenant comme un onglet de la page Performance ("Risque", entre
+"Overlay" et "À venir" — voir page_performance.py), plus comme une page à
+part entière dans la sidebar : ce contenu était trop peu dense pour
+justifier sa propre entrée de navigation, isolée du reste des diagnostics.
 
 Interrupteur pour tout désactiver : le calcul lui-même est instantané (pas
 de thread ni de polling, juste une lecture de config), mais on respecte
 quand même le principe "aucune analyse sans consentement explicite" —
-désactivé, la page n'affiche/ne calcule rien du tout.
+désactivé, ce panneau n'affiche/ne calcule rien du tout.
 """
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core.config import config
 from core.i18n import t
 from features.risk.risk_score import RiskEstimate, compute_risk_estimate
-from ui.pages.base_page import BasePage
 from ui.ring_gauge import RingGauge
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.toggle_switch import ToggleSwitch
@@ -27,34 +31,44 @@ _LEVEL_LABEL_KEYS = {
 }
 
 
-class RiskPage(BasePage):
+class RiskControlsPanel(QFrame):
+    """Contenu de l'onglet "Risque" de la page Performance : interrupteur en
+    haut (même position que "Activer l'overlay" dans l'onglet Overlay), puis
+    la carte de score ou la carte "désactivé" en dessous — repris tel quel
+    de l'ancienne page dédiée, juste sans son propre titre de page (l'onglet
+    lui-même porte déjà le libellé "Risque")."""
+
     def __init__(self, parent=None):
-        super().__init__(t("page.risk.title"), "", parent)
-        self.add_info_badge(t("page.risk.subtitle"))
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent;")
 
-        toggle_control = QWidget()
-        toggle_row = QHBoxLayout(toggle_control)
-        toggle_row.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        toggle_row = QHBoxLayout()
         toggle_row.setSpacing(8)
-
         toggle_label = QLabel(t("page.risk.toggle_label"))
-        toggle_label.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {STATUS_NEUTRAL};")
+        toggle_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
         toggle_row.addWidget(toggle_label)
-
+        toggle_row.addStretch(1)
         self.analysis_toggle = ToggleSwitch(checked=bool(config.get("risk_analysis_enabled", True)))
         self.analysis_toggle.toggled.connect(self._on_toggle)
         toggle_row.addWidget(self.analysis_toggle)
-
-        self.header_layout().addWidget(toggle_control)
+        layout.addLayout(toggle_row)
 
         self.body_layout = QVBoxLayout()
         self.body_layout.setSpacing(14)
-        self.content_layout().addLayout(self.body_layout, 1)
+        layout.addLayout(self.body_layout)
+        layout.addStretch(1)
+
+        self._render()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Recalculé à chaque affichage : pas un thread, juste une lecture de
-        # config instantanée, donc pas de souci à la relancer à chaque visite.
+        # Recalculé à chaque affichage (bascule vers cet onglet incluse) :
+        # pas un thread, juste une lecture de config instantanée, donc pas de
+        # souci à la relancer à chaque fois.
         self._render()
 
     def _on_toggle(self, checked: bool) -> None:
@@ -74,11 +88,15 @@ class RiskPage(BasePage):
 
         estimate = compute_risk_estimate()
         self.body_layout.addWidget(self._build_score_card(estimate))
-        self.body_layout.addStretch(1)
 
     def _build_disabled_card(self) -> QFrame:
+        # Pas de classe "card" ici : le conteneur extérieur commun aux 3
+        # onglets de la page Performance (voir
+        # PerformancePage._build_scrollable_tab_container) porte déjà la
+        # bordure/le fond — un second contour imbriqué au même endroit
+        # ferait une double bordure.
         frame = QFrame()
-        frame.setProperty("class", "card")
+        frame.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(24, 24, 24, 24)
         label = QLabel(t("page.risk.disabled_text"))
@@ -88,8 +106,9 @@ class RiskPage(BasePage):
         return frame
 
     def _build_score_card(self, estimate: RiskEstimate) -> QFrame:
+        # Pas de classe "card" ici non plus, même raison que _build_disabled_card.
         frame = QFrame()
-        frame.setProperty("class", "card")
+        frame.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)

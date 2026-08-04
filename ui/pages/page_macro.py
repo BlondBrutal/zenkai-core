@@ -316,7 +316,7 @@ class MacroPage(BasePage):
         wrapper = QWidget()
         row = QHBoxLayout(wrapper)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(7)  # -10%
+        row.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         label = QLabel(t("page.macro.kill_switch_label"))
         label.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {STATUS_NEUTRAL};")
@@ -359,8 +359,8 @@ class MacroPage(BasePage):
         column.setFixedWidth(260)
 
         layout = QVBoxLayout(column)
-        layout.setContentsMargins(14, 14, 14, 14)  # -10%
-        layout.setSpacing(7)  # -10%
+        layout.setContentsMargins(13, 13, 13, 13)  # -10% (2e passe : 16 -> 14 -> 13)
+        layout.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         title = QLabel(t("page.macro.library_title"))
         title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
@@ -387,7 +387,7 @@ class MacroPage(BasePage):
         self.export_btn.clicked.connect(self._on_export_clicked)
         layout.addWidget(self.export_btn)
 
-        layout.addSpacing(7)  # -10%
+        layout.addSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         # Liste et message "vide" partagent une même zone (QStackedWidget) de
         # hauteur constante (stretch=1, comme avant pour la seule liste) :

@@ -13,18 +13,23 @@ import logging
 from PyQt6.QtCore import QPointF, QRectF, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
-    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QMessageBox, QPushButton, QScrollArea, QSlider, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from core.config import config
 from core.i18n import t
 from features.performance.fixes import disable_game_dvr, disable_sysmain, enable_game_mode, set_power_plan_high_performance
+from features.performance.fps_monitor import FpsMonitorThread
 from features.performance.live_monitor import LiveMonitorThread, LiveSample
+from features.performance.overlay import ALL_ELEMENTS, PerformanceOverlay
+from features.performance.ping_monitor import PingMonitorThread
 from features.performance.scan import PerformanceScanWorker, ScanResult
 from features.performance.status_cards import StatusCard
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
+from ui.pages.page_risk import RiskControlsPanel
 from ui.ring_gauge import RingGauge
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.toggle_switch import ToggleSwitch
@@ -43,6 +48,18 @@ _LIVE_TILE_HEIGHT = 150
 _RING_WARNING_PERCENT = 50.0
 _RING_CRITICAL_PERCENT = 80.0
 
+# Ping et FPS de l'overlay ciblent toujours ce process, en dur : cette app
+# sert uniquement Blox Fruits (un jeu Roblox), donc le vrai process qui
+# tourne est toujours le client Roblox lui-même, quelle que soit
+# l'expérience chargée dedans — jamais un sélecteur d'application générique.
+ROBLOX_PROCESS_NAME = "RobloxPlayerBeta.exe"
+
+# Redéclare juste "margin" par-dessus la règle globale QScrollBar:vertical de
+# theme.qss (margin: 0px partout ailleurs) : scopé aux QScrollArea des
+# onglets Overlay/Risque uniquement (voir _build_scrollable_tab_container),
+# pas un changement du style de scrollbar app-wide.
+_SCROLLBAR_INSET_QSS = "QScrollBar:vertical { margin: 4px 6px 4px 0px; }"
+
 
 def _severity_color(value: float) -> str:
     if value >= _RING_CRITICAL_PERCENT:
@@ -50,82 +67,6 @@ def _severity_color(value: float) -> str:
     if value >= _RING_WARNING_PERCENT:
         return STATUS_WARNING
     return STATUS_OK
-
-
-class PowerIcon(QWidget):
-    """Symbole "power" (⏻) dessiné en vectoriel (arc + trait), jamais en
-    caractère Unicode/emoji — cercle englobant qui délimite toute la zone
-    cliquable, avec le glyphe marche/arrêt (arc ouvert + trait) à l'intérieur."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(_HERO_SIZE, _HERO_SIZE)
-        self._color = QColor(STATUS_OK)
-
-    def set_hovered(self, hovered: bool) -> None:
-        self._color = QColor("#1BDAB3") if hovered else QColor(STATUS_OK)
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Cercle englobant : délimite toute la zone cliquable du bouton.
-        # Contour plus épais que la première version.
-        painter.setPen(QPen(QColor(self._color.red(), self._color.green(), self._color.blue(), 110), 3.5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        boundary_rect = QRectF(3.5, 3.5, self.width() - 7, self.height() - 7)
-        painter.drawEllipse(boundary_rect)
-
-        # Glyphe power (arc ouvert + trait), avec plus d'air par rapport au
-        # contour englobant qu'avant (marge augmentée).
-        painter.setPen(QPen(self._color, 5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        margin = self.width() * 0.27
-        glyph_rect = QRectF(margin, margin, self.width() - 2 * margin, self.height() - 2 * margin)
-        # Ouverture de ~70deg centrée en haut (90deg) : trace les 290deg restants.
-        painter.drawArc(glyph_rect, int(125 * 16), int(290 * 16))
-
-        center_x = self.width() / 2
-        top_y = glyph_rect.top() - 1
-        stem_y = glyph_rect.top() + glyph_rect.height() * 0.45
-        painter.drawLine(QPointF(center_x, top_y), QPointF(center_x, stem_y))
-
-
-class _PowerButton(QWidget):
-    """Icône power + texte, cliquable, en turquoise — remplace le bouton
-    rectangulaire pour lancer le premier scan."""
-
-    clicked = pyqtSignal()
-
-    def __init__(self, text: str, parent=None):
-        super().__init__(parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-
-        self.icon = PowerIcon()
-        layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        self.label = QLabel(text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {STATUS_OK};")
-        layout.addWidget(self.label)
-
-    def mousePressEvent(self, event) -> None:
-        self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def enterEvent(self, event) -> None:
-        self.icon.set_hovered(True)
-        self.label.setStyleSheet("font-size: 22px; font-weight: 700; color: #1BDAB3;")
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        self.icon.set_hovered(False)
-        self.label.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {STATUS_OK};")
-        super().leaveEvent(event)
 
 
 class PulsingLoader(QWidget):
@@ -171,6 +112,347 @@ class PulsingLoader(QWidget):
 
         painter.setPen(QPen(self._COLOR, thickness, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawArc(rect, -self._angle * 16, self._SPAN_DEGREES * 16)
+
+
+# --- Colonne de sélection de section (Diagnostic / Overlay / réservé) ------
+_TAB_ICON_SIZE = 20
+_TAB_DISABLED_COLOR = "#4A4E56"
+# Couleur de fond des tuiles (voir QFrame.navTabButton dans theme.qss) : sert
+# à peindre l'icône "calques" en dur pour masquer le coin qui se chevauche
+# (même technique que l'ancienne _OverlayIcon de la tuile "Activer l'overlay").
+_TAB_TILE_BG = QColor("#1F1F25")
+
+
+class _DiagnosticTabIcon(QWidget):
+    """Loupe vectorielle (cercle + manche) pour l'onglet "Diagnostic"."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(_TAB_ICON_SIZE, _TAB_ICON_SIZE)
+        self._color = QColor(STATUS_NEUTRAL)
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        painter.setPen(QPen(self._color, 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        lens_rect = QRectF(w * 0.10, h * 0.10, w * 0.58, h * 0.58)
+        painter.drawEllipse(lens_rect)
+        painter.drawLine(
+            QPointF(lens_rect.right() - w * 0.06, lens_rect.bottom() - h * 0.06),
+            QPointF(w * 0.92, h * 0.92),
+        )
+
+
+class _OverlayTabIcon(QWidget):
+    """Icône "calques" (deux carrés arrondis superposés) pour l'onglet
+    "Overlay" — même dessin que l'ancienne tuile "Activer l'overlay"."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(_TAB_ICON_SIZE, _TAB_ICON_SIZE)
+        self._color = QColor(STATUS_NEUTRAL)
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        back = QRectF(w * 0.06, h * 0.04, w * 0.62, h * 0.62)
+        front = QRectF(w * 0.32, h * 0.34, w * 0.62, h * 0.62)
+
+        painter.setPen(QPen(self._color, 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(back, 3, 3)
+
+        painter.setBrush(_TAB_TILE_BG)
+        painter.drawRoundedRect(front, 3, 3)
+
+
+class _RiskTabIcon(QWidget):
+    """Icône bouclier vectorielle (silhouette + point d'exclamation) pour
+    l'onglet "Risque"."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(_TAB_ICON_SIZE, _TAB_ICON_SIZE)
+        self._color = QColor(STATUS_NEUTRAL)
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        shield = QPainterPath()
+        shield.moveTo(w * 0.5, h * 0.06)
+        shield.cubicTo(w * 0.78, h * 0.14, w * 0.86, h * 0.16, w * 0.86, h * 0.16)
+        shield.lineTo(w * 0.86, h * 0.46)
+        shield.cubicTo(w * 0.86, h * 0.74, w * 0.68, h * 0.90, w * 0.5, h * 0.96)
+        shield.cubicTo(w * 0.32, h * 0.90, w * 0.14, h * 0.74, w * 0.14, h * 0.46)
+        shield.lineTo(w * 0.14, h * 0.16)
+        shield.cubicTo(w * 0.14, h * 0.16, w * 0.22, h * 0.14, w * 0.5, h * 0.06)
+        shield.closeSubpath()
+
+        painter.setPen(QPen(self._color, 1.8))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(shield)
+
+        painter.setPen(QPen(self._color, 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(w * 0.5, h * 0.32), QPointF(w * 0.5, h * 0.56))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color)
+        painter.drawEllipse(QPointF(w * 0.5, h * 0.68), w * 0.035, w * 0.035)
+
+
+class _ReservedTabIcon(QWidget):
+    """Icône cadenas vectorielle (corps + anse) pour le 3e onglet, réservé
+    à une future fonctionnalité — signale visuellement "pas encore
+    disponible" plutôt qu'un simple onglet inactif."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(_TAB_ICON_SIZE, _TAB_ICON_SIZE)
+        self._color = QColor(_TAB_DISABLED_COLOR)
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color)
+        body = QRectF(w * 0.20, h * 0.45, w * 0.60, h * 0.42)
+        painter.drawRoundedRect(body, 2, 2)
+
+        painter.setPen(QPen(self._color, 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        shackle_rect = QRectF(w * 0.30, h * 0.10, w * 0.40, h * 0.48)
+        painter.drawArc(shackle_rect, 0, 180 * 16)
+
+
+class _NavTabButton(QFrame):
+    """Bouton d'onglet vertical de la colonne de droite : icône + texte côte
+    à côte, état actif en turquoise avec contour — même logique de mise en
+    évidence que _SegmentButton (page_macro.py, onglets "Macro type"), en
+    empilement vertical plutôt qu'horizontal."""
+
+    clicked = pyqtSignal()
+
+    def __init__(self, icon: QWidget, text: str, parent=None):
+        super().__init__(parent)
+        self.setProperty("class", "navTabButton")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._icon = icon
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+        layout.addWidget(icon, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._label = QLabel(text)
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label, 1)
+
+        self.set_active(False)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def set_active(self, active: bool) -> None:
+        self.setProperty("active", "true" if active else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        color = STATUS_OK if active else STATUS_NEUTRAL
+        self._icon.set_color(color)
+        self._label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {color};")
+
+    def setEnabled(self, enabled: bool) -> None:
+        super().setEnabled(enabled)
+        if not enabled:
+            # Grisé plus fort que l'état "inactif" normal : signale un
+            # bouton réservé pour plus tard, pas juste un onglet non
+            # sélectionné qu'on pourrait cliquer.
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self._icon.set_color(_TAB_DISABLED_COLOR)
+            self._label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {_TAB_DISABLED_COLOR};")
+
+
+_OVERLAY_ELEMENT_LABEL_KEYS = {
+    "cpu": "page.performance.overlay_element_cpu",
+    "ram": "page.performance.overlay_element_ram",
+    "gpu": "page.performance.overlay_element_gpu",
+    "disk": "page.performance.overlay_element_disk",
+    "net": "page.performance.overlay_element_net",
+    "ping": "page.performance.overlay_element_ping",
+    "fps": "page.performance.overlay_element_fps",
+    "battery": "page.performance.overlay_element_battery",
+}
+
+
+class _OverlayControlsPanel(QFrame):
+    """Contenu de l'onglet "Overlay" de la zone principale : activation +
+    tous les réglages (éléments affichés, opacité fond/texte, taille de
+    police). Vit directement dans la zone principale comme les résultats du
+    diagnostic — pas de dialogue modal par-dessus, un onglet dédié n'en a
+    pas besoin (voir _build_section_tabs_column). Chaque changement
+    s'applique EN DIRECT sur l'overlay déjà affiché (aperçu immédiat), pas
+    seulement en quittant l'onglet.
+
+    Ping et FPS ciblent toujours Roblox (voir ROBLOX_PROCESS_NAME) : pas de
+    sélecteur d'application ici, cette app ne sert qu'à Blox Fruits/Roblox.
+
+    Pas de classe QSS "card" ici (contrairement à l'ancienne version) : ce
+    panneau vit maintenant DANS une QScrollArea (voir
+    PerformancePage._build_overlay_tab_container) qui porte elle-même le
+    fond/contour "card" — sinon la bordure arrondie défilerait avec le
+    contenu au lieu de rester fixe autour de la zone de défilement."""
+
+    enabled_toggled = pyqtSignal(bool)
+    settings_changed = pyqtSignal(list, int, int, int)  # (elements, bg_opacity_percent, text_opacity_percent, font_size)
+
+    def __init__(
+        self,
+        enabled: bool,
+        elements: list[str],
+        bg_opacity_percent: int,
+        text_opacity_percent: int,
+        font_size: int,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        enable_row = QHBoxLayout()
+        enable_row.setSpacing(8)
+        enable_label = QLabel(t("page.performance.overlay_enable_tile"))
+        enable_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        enable_row.addWidget(enable_label)
+        enable_row.addStretch(1)
+        self.enable_toggle = ToggleSwitch(checked=enabled)
+        self.enable_toggle.toggled.connect(self.enabled_toggled.emit)
+        enable_row.addWidget(self.enable_toggle)
+        layout.addLayout(enable_row)
+
+        hint = QLabel(t("page.performance.overlay_drag_hint"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
+        layout.addWidget(hint)
+
+        # Section "Éléments affichés" : 2 colonnes de toggles (inchangé),
+        # empilée verticalement au-dessus de la section "Apparence" — pas
+        # côte à côte (ça faisait déborder le panneau horizontalement,
+        # d'où la barre de scroll qui apparaissait à l'horizontale en bas
+        # au lieu de rester verticale sur le bord droit).
+        elements_title = QLabel(t("page.performance.overlay_elements_title"))
+        elements_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #E7E9EE;")
+        layout.addWidget(elements_title)
+
+        # 2 colonnes plutôt qu'une seule liste verticale : sur la largeur de
+        # ce panneau, une seule colonne laissait un grand vide horizontal
+        # entre le label et le toggle (aussi étroite que la ligne "CPU :").
+        elements_columns = QHBoxLayout()
+        elements_columns.setSpacing(20)
+        left_column = QVBoxLayout()
+        left_column.setSpacing(10)
+        right_column = QVBoxLayout()
+        right_column.setSpacing(10)
+        elements_columns.addLayout(left_column, 1)
+        elements_columns.addLayout(right_column, 1)
+        layout.addLayout(elements_columns)
+
+        # CPU/RAM/GPU/Disque à gauche, Réseau/Ping/FPS/Batterie à droite (les
+        # 2 premiers groupes historiques vs les groupes ajoutés ensuite).
+        column_split = (ALL_ELEMENTS[:4], ALL_ELEMENTS[4:])
+
+        self._toggles: dict[str, ToggleSwitch] = {}
+        for column_layout, keys in zip((left_column, right_column), column_split):
+            for key in keys:
+                row = QHBoxLayout()
+                row.setSpacing(8)
+                label = QLabel(t(_OVERLAY_ELEMENT_LABEL_KEYS[key]))
+                label.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
+                row.addWidget(label)
+                row.addStretch(1)
+                toggle = ToggleSwitch(checked=key in elements)
+                toggle.toggled.connect(self._emit_changed)
+                row.addWidget(toggle)
+                column_layout.addLayout(row)
+                self._toggles[key] = toggle
+            column_layout.addStretch(1)
+
+        # Fine ligne de séparation horizontale entre les 2 sections — même
+        # style que le séparateur déjà utilisé entre les emplacements de la
+        # page Macro Pixel (voir _build_green_separator dans
+        # macro_pixel_tab.py), juste sans largeur fixe (celle-ci s'étire sur
+        # toute la largeur du panneau au lieu d'une colonne figée).
+        separator = QFrame()
+        separator.setFixedHeight(2)
+        separator.setStyleSheet(f"background-color: {STATUS_OK}; border: none; border-radius: 1px;")
+        layout.addWidget(separator)
+
+        # Section "Apparence" : les 3 curseurs empilés verticalement, chacun
+        # sur toute la largeur disponible avec son label complet AU-DESSUS
+        # (jamais à côté) — un label à côté aurait dû se couper sur 2 lignes
+        # de façon inégale pour "Opacité du fond"/"Opacité du texte"/"Taille
+        # du texte" à cette largeur.
+        appearance_title = QLabel(t("page.performance.overlay_appearance_title"))
+        appearance_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #E7E9EE;")
+        layout.addWidget(appearance_title)
+
+        self.bg_opacity_slider = self._build_full_width_slider(
+            layout, t("page.performance.overlay_bg_opacity_label"), 20, 100, bg_opacity_percent
+        )
+        self.text_opacity_slider = self._build_full_width_slider(
+            layout, t("page.performance.overlay_text_opacity_label"), 20, 100, text_opacity_percent
+        )
+        self.font_slider = self._build_full_width_slider(
+            layout, t("page.performance.overlay_font_size_label"), 9, 24, font_size
+        )
+
+        layout.addStretch(1)
+
+    def _build_full_width_slider(
+        self, parent_layout: QVBoxLayout, title_text: str, minimum: int, maximum: int, value: int
+    ) -> QSlider:
+        title = QLabel(title_text)
+        title.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
+        parent_layout.addWidget(title)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(minimum, maximum)
+        slider.setValue(value)
+        slider.valueChanged.connect(self._emit_changed)
+        parent_layout.addWidget(slider)
+        return slider
+
+    def _emit_changed(self, *_args) -> None:
+        elements = [key for key, toggle in self._toggles.items() if toggle.isChecked()]
+        self.settings_changed.emit(
+            elements, self.bg_opacity_slider.value(), self.text_opacity_slider.value(), self.font_slider.value()
+        )
 
 
 logger = logging.getLogger("zenkaiontop.performance")
@@ -326,6 +608,12 @@ class _StatusCardWidget(QFrame):
         header = QHBoxLayout()
         title = QLabel(t(card.title_key))
         title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        # wordWrap + stretch : sans ça, un titre long ("Xbox Game Bar /
+        # enregistrement en arrière-plan") imposait une largeur minimale à
+        # toute la carte (donc à toute la zone de résultats) plutôt que de
+        # passer sur 2 lignes — c'est ce qui provoquait un débordement
+        # horizontal (scroll horizontal) dès qu'un tel diagnostic apparaissait.
+        title.setWordWrap(True)
         header.addWidget(title)
         header.addStretch(1)
 
@@ -347,7 +635,7 @@ class _StatusCardWidget(QFrame):
             # uniforme du layout) : sans ça, il reste collé au texte au-dessus.
             layout.addSpacing(6)
 
-            self.fix_btn = AnimatedButton(t("page.performance.auto_fix_btn"), variant="primary")
+            self.fix_btn = AnimatedButton(t("page.performance.auto_fix_btn"), variant="secondary")
             self.fix_btn.clicked.connect(self._run_auto_fix)
             layout.addWidget(self.fix_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
@@ -432,8 +720,13 @@ class PerformancePage(BasePage):
         self._live_thread: LiveMonitorThread | None = None
         self._scan_worker: PerformanceScanWorker | None = None
         self._last_result: ScanResult | None = None
+        self._overlay: PerformanceOverlay | None = None
+        self._ping_thread: PingMonitorThread | None = None
+        self._fps_thread: FpsMonitorThread | None = None
 
         QApplication.instance().aboutToQuit.connect(self._stop_live_thread)
+        QApplication.instance().aboutToQuit.connect(self._stop_ping_thread)
+        QApplication.instance().aboutToQuit.connect(self._stop_fps_thread)
 
         # Interrupteur au même niveau visuel que le titre, aligné à droite
         # (header_layout() pousse tout ce qui est ajouté après son stretch interne).
@@ -441,32 +734,98 @@ class PerformancePage(BasePage):
 
         self.content_layout().addWidget(self._build_monitoring_status_label())
         self.content_layout().addWidget(self._build_live_row())
-        self.content_layout().addSpacing(16)
+        # Même écart que celui, de référence, entre les tuiles CPU/RAM/GPU/
+        # Disque ci-dessus (QHBoxLayout.setSpacing(12) dans _build_live_row) :
+        # 6 (spacing implicite de content_layout()) + 6 = 12, au lieu des 22px
+        # (6 + 16) que ce addSpacing(16) donnait avant.
+        self.content_layout().addSpacing(6)
 
+        # Résultats en premier (index 0, affiché par défaut) : plus d'écran
+        # "Analysez votre PC..." intermédiaire avant le premier lancement —
+        # la mise en page des résultats est visible dès l'affichage de
+        # l'onglet, juste vide (seul le bouton d'action) tant qu'aucun
+        # diagnostic n'a encore tourné (voir _build_results_container).
         self.scan_stack = QStackedWidget()
-        self._empty_index = self.scan_stack.addWidget(self._build_empty_state())
-        self._scanning_index = self.scan_stack.addWidget(self._build_scanning_state())
         self._results_index = self.scan_stack.addWidget(self._build_results_container())
-        self.content_layout().addWidget(self.scan_stack, 1)
+        self._scanning_index = self.scan_stack.addWidget(self._build_scanning_state())
+
+        self._overlay_panel = _OverlayControlsPanel(
+            self._overlay_enabled(),
+            config.get("performance_overlay_elements", list(ALL_ELEMENTS)),
+            int(config.get("performance_overlay_bg_opacity", 85)),
+            int(config.get("performance_overlay_text_opacity", 100)),
+            int(config.get("performance_overlay_font_size", 13)),
+        )
+        self._overlay_panel.enabled_toggled.connect(self._on_overlay_enabled_toggled)
+        self._overlay_panel.settings_changed.connect(self._on_overlay_settings_changed)
+
+        self._risk_panel = RiskControlsPanel()
+
+        # Zone principale : bascule entre le contenu Diagnostic (inchangé),
+        # le panneau Overlay et le panneau Risque selon l'onglet actif de la
+        # colonne de droite — même taille/position quel que soit l'onglet
+        # (un seul QStackedWidget partagé, pas une reconstruction de layout
+        # à chaque bascule).
+        self.section_stack = QStackedWidget()
+        # Les 3 onglets partagent EXACTEMENT le même conteneur extérieur
+        # (bordure + fond "card" + scrollbar, voir _build_scrollable_tab_container) :
+        # leur contenu respectif (scan_stack/panneau overlay/panneau risque)
+        # est donc lui-même transparent, sans sa propre bordure "card"
+        # imbriquée (voir _build_empty_state/_build_scanning_state/
+        # _build_results_container/RiskControlsPanel), sous peine de double
+        # contour empilé au même endroit.
+        self._section_diagnostic_index = self.section_stack.addWidget(
+            self._build_scrollable_tab_container(self.scan_stack)
+        )
+        self._section_overlay_index = self.section_stack.addWidget(
+            self._build_scrollable_tab_container(self._overlay_panel)
+        )
+        self._section_risk_index = self.section_stack.addWidget(
+            self._build_scrollable_tab_container(self._risk_panel)
+        )
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(12)
+        bottom_row.addWidget(self.section_stack, 1)
+        bottom_row.addWidget(self._build_section_tabs_column())
+        self.content_layout().addLayout(bottom_row, 1)
+
+        # Si l'overlay était actif à la fermeture précédente, il réapparaît
+        # tout seul au lancement (même logique que le kill switch des macros,
+        # voir page_macro.py) — sans attendre que l'utilisateur revienne sur
+        # cette page (elle est déjà construite au démarrage, voir
+        # MainWindow._build_pages).
+        if bool(config.get("performance_overlay_enabled", False)):
+            self._ensure_overlay()
+            self._apply_overlay_settings()
+            self._overlay.show()
+            self._start_live_thread()
+            self._sync_process_threads()
 
     # ------------------------------------------------------------------
-    # Cycle de vie : le monitoring en direct ne tourne que page affichée
-    # ET interrupteur activé — jamais de polling sans les deux à la fois.
+    # Cycle de vie : le monitoring en direct tourne tant que la page est
+    # affichée ET l'interrupteur activé, OU tant que l'overlay est actif
+    # (lui doit continuer à se mettre à jour même quand on quitte cette page
+    # pour aller jouer — voir _stop_live_thread_if_unneeded).
     # ------------------------------------------------------------------
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if self.monitoring_toggle.isChecked():
+        if self.monitoring_toggle.isChecked() or self._overlay_enabled():
             self._start_live_thread()
 
     def hideEvent(self, event) -> None:
         super().hideEvent(event)
-        self._stop_live_thread()
+        self._stop_live_thread_if_unneeded()
         self.scan_loader.stop()
+
+    def _overlay_enabled(self) -> bool:
+        return bool(config.get("performance_overlay_enabled", False))
 
     def _start_live_thread(self) -> None:
         if self._live_thread is None or not self._live_thread.isRunning():
             self._live_thread = LiveMonitorThread(self)
             self._live_thread.sample_ready.connect(self._on_live_sample)
+            self._live_thread.sample_ready.connect(self._on_overlay_sample)
             self._live_thread.start()
 
     def _stop_live_thread(self) -> None:
@@ -474,12 +833,16 @@ class PerformancePage(BasePage):
             self._live_thread.stop()
             self._live_thread.wait(2000)
 
+    def _stop_live_thread_if_unneeded(self) -> None:
+        if not self.monitoring_toggle.isChecked() and not self._overlay_enabled():
+            self._stop_live_thread()
+
     def _on_monitoring_toggled(self, checked: bool) -> None:
         config.set("performance_live_monitoring_enabled", checked)
         if checked:
             self._start_live_thread()
         else:
-            self._stop_live_thread()
+            self._stop_live_thread_if_unneeded()
             self._reset_live_tiles()
         self.monitoring_status_label.setVisible(not checked)
 
@@ -518,6 +881,183 @@ class PerformancePage(BasePage):
         self.monitoring_status_label.setStyleSheet(f"font-size: 11px; color: {STATUS_NEUTRAL};")
         self.monitoring_status_label.setVisible(not initial_enabled)
         return self.monitoring_status_label
+
+    # ------------------------------------------------------------------
+    # Colonne de sélection de section (Diagnostic / Overlay / réservé)
+    # ------------------------------------------------------------------
+    def _build_section_tabs_column(self) -> QFrame:
+        column = QFrame()
+        column.setProperty("class", "card")
+
+        layout = QVBoxLayout(column)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+
+        self._section_tab_buttons: list[_NavTabButton] = []
+
+        diagnostic_btn = _NavTabButton(_DiagnosticTabIcon(), t("page.performance.tab_diagnostic"))
+        diagnostic_btn.clicked.connect(lambda: self._on_section_tab_clicked(self._section_diagnostic_index))
+        layout.addWidget(diagnostic_btn)
+        self._section_tab_buttons.append(diagnostic_btn)
+
+        overlay_btn = _NavTabButton(_OverlayTabIcon(), t("page.performance.tab_overlay"))
+        overlay_btn.clicked.connect(lambda: self._on_section_tab_clicked(self._section_overlay_index))
+        layout.addWidget(overlay_btn)
+        self._section_tab_buttons.append(overlay_btn)
+
+        risk_btn = _NavTabButton(_RiskTabIcon(), t("page.performance.tab_risk"))
+        risk_btn.clicked.connect(lambda: self._on_section_tab_clicked(self._section_risk_index))
+        layout.addWidget(risk_btn)
+        self._section_tab_buttons.append(risk_btn)
+
+        reserved_btn = _NavTabButton(_ReservedTabIcon(), t("page.performance.tab_reserved"))
+        reserved_btn.setEnabled(False)
+        layout.addWidget(reserved_btn)
+        self._section_tab_buttons.append(reserved_btn)
+
+        layout.addStretch(1)
+
+        # Largeur calée sur le plus long des 4 libellés (icône comprise)
+        # plutôt qu'une valeur fixe devinée à la main : "Diagnostic"/"Coming
+        # soon" sont des mots (ou expressions) qu'un QLabel en wordWrap ne
+        # peut pas couper faute d'espace au bon endroit — une colonne trop
+        # étroite les ferait déborder au lieu de les afficher proprement.
+        # +10% supplémentaires demandés par-dessus ce contenu réel.
+        content_width = max(btn.sizeHint().width() for btn in self._section_tab_buttons)
+        column.setFixedWidth(round((content_width + 20) * 1.1))
+
+        self._active_section_index = self._section_diagnostic_index
+        self._section_tab_buttons[self._active_section_index].set_active(True)
+        return column
+
+    def _on_section_tab_clicked(self, index: int) -> None:
+        if index == self._active_section_index:
+            return
+        self._active_section_index = index
+        for i, btn in enumerate(self._section_tab_buttons):
+            btn.set_active(i == index)
+        self.section_stack.setCurrentIndex(index)
+
+    # ------------------------------------------------------------------
+    # Les 3 onglets (Diagnostic/Overlay/Risque) : même conteneur extérieur
+    # (voir _build_scrollable_tab_container)
+    # ------------------------------------------------------------------
+    def _build_scrollable_tab_container(self, content: QWidget) -> QScrollArea:
+        """Conteneur commun aux 3 onglets de la zone principale : bordure +
+        fond "card" + barre de scroll verticale, identiques quel que soit
+        l'onglet actif. `content` (scan_stack / panneau overlay / panneau
+        risque) n'a lui-même aucune carte interne (juste des widgets qui
+        flottent, background transparent) — le fond/contour "card" est donc
+        porté par la QScrollArea elle-même (reste fixe pendant le
+        défilement), jamais dupliqué à l'intérieur.
+
+        Marge ajoutée autour de la barre de scroll (au lieu du "margin: 0px"
+        global de theme.qss) : sans ça, elle reste collée directement contre
+        le bord de la zone — un léger espace la détache du contour."""
+        scroll = QScrollArea()
+        scroll.setProperty("class", "card")
+        scroll.setStyleSheet(_SCROLLBAR_INSET_QSS)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setStyleSheet("background: transparent;")
+        scroll.setWidget(content)
+        return scroll
+
+    def _ensure_overlay(self) -> None:
+        if self._overlay is None:
+            self._overlay = PerformanceOverlay()
+
+    def _apply_overlay_settings(self) -> None:
+        self._overlay.apply_settings(
+            config.get("performance_overlay_elements", list(ALL_ELEMENTS)),
+            int(config.get("performance_overlay_bg_opacity", 85)),
+            int(config.get("performance_overlay_text_opacity", 100)),
+            int(config.get("performance_overlay_font_size", 13)),
+        )
+
+    def _on_overlay_enabled_toggled(self, enabled: bool) -> None:
+        config.set("performance_overlay_enabled", enabled)
+
+        if enabled:
+            self._ensure_overlay()
+            self._apply_overlay_settings()
+            self._overlay.show()
+            self._start_live_thread()
+        else:
+            if self._overlay is not None:
+                self._overlay.hide()
+            self._stop_live_thread_if_unneeded()
+        self._sync_process_threads()
+
+    def _on_overlay_settings_changed(
+        self, elements: list[str], bg_opacity_percent: int, text_opacity_percent: int, font_size: int
+    ) -> None:
+        config.set("performance_overlay_elements", elements)
+        config.set("performance_overlay_bg_opacity", bg_opacity_percent)
+        config.set("performance_overlay_text_opacity", text_opacity_percent)
+        config.set("performance_overlay_font_size", font_size)
+        if self._overlay is not None:
+            self._overlay.apply_settings(elements, bg_opacity_percent, text_opacity_percent, font_size)
+        self._sync_process_threads()
+
+    def _on_overlay_sample(self, sample: LiveSample) -> None:
+        if self._overlay is not None and self._overlay.isVisible():
+            self._overlay.update_sample(sample)
+
+    # ------------------------------------------------------------------
+    # Ping / FPS : ciblent toujours Roblox (voir ROBLOX_PROCESS_NAME — cette
+    # app ne sert qu'à Blox Fruits/Roblox, pas besoin de sélecteur), tournent
+    # tant que l'overlay ET l'élément correspondant sont activés —
+    # indépendamment de la visibilité de cette page, comme LiveMonitorThread
+    # (voir _sync_process_threads).
+    # ------------------------------------------------------------------
+    def _sync_process_threads(self) -> None:
+        self._sync_ping_thread()
+        self._sync_fps_thread()
+
+    def _sync_ping_thread(self) -> None:
+        elements = config.get("performance_overlay_elements", list(ALL_ELEMENTS))
+        want = self._overlay_enabled() and "ping" in elements
+
+        if want and self._ping_thread is not None and self._ping_thread.isRunning():
+            return
+        self._stop_ping_thread()
+        if want:
+            self._ping_thread = PingMonitorThread(ROBLOX_PROCESS_NAME, self)
+            self._ping_thread.ping_ready.connect(self._on_ping_sample)
+            self._ping_thread.start()
+
+    def _stop_ping_thread(self) -> None:
+        if self._ping_thread is not None:
+            self._ping_thread.stop()
+            self._ping_thread.wait(2000)
+            self._ping_thread = None
+
+    def _sync_fps_thread(self) -> None:
+        elements = config.get("performance_overlay_elements", list(ALL_ELEMENTS))
+        want = self._overlay_enabled() and "fps" in elements
+
+        if want and self._fps_thread is not None and self._fps_thread.isRunning():
+            return
+        self._stop_fps_thread()
+        if want:
+            self._fps_thread = FpsMonitorThread(ROBLOX_PROCESS_NAME, self)
+            self._fps_thread.fps_ready.connect(self._on_fps_sample)
+            self._fps_thread.start()
+
+    def _stop_fps_thread(self) -> None:
+        if self._fps_thread is not None:
+            self._fps_thread.stop()
+            self._fps_thread.wait(2000)
+            self._fps_thread = None
+
+    def _on_ping_sample(self, ping_ms) -> None:
+        if self._overlay is not None and self._overlay.isVisible():
+            self._overlay.update_ping(ping_ms)
+
+    def _on_fps_sample(self, fps) -> None:
+        if self._overlay is not None and self._overlay.isVisible():
+            self._overlay.update_fps(fps)
 
     def _build_ring_tile(self, title: str) -> tuple[QFrame, RingGauge, QLabel]:
         # Structure et hauteur strictement identiques pour CPU/RAM/GPU (même
@@ -599,6 +1139,12 @@ class PerformancePage(BasePage):
         return row
 
     def _on_live_sample(self, sample: LiveSample) -> None:
+        # Le thread peut tourner uniquement pour l'overlay (page masquée ou
+        # interrupteur "Monitoring en direct" éteint, voir
+        # _stop_live_thread_if_unneeded) : les tuiles de CETTE page ne
+        # doivent alors pas se remettre à jour toutes seules.
+        if not self.monitoring_toggle.isChecked():
+            return
         self.cpu_ring.set_target(sample.cpu_percent, _severity_color(sample.cpu_percent))
 
         # Pas de quantité en Go ici : déjà présente dans la fiche de
@@ -617,40 +1163,15 @@ class PerformancePage(BasePage):
         self.disk_write_label.setText(f"{t('page.performance.disk_write')} {sample.disk_write_mbps:.1f} Mo/s")
 
     # ------------------------------------------------------------------
-    # État vide (avant le premier scan)
-    # ------------------------------------------------------------------
-    def _build_empty_state(self) -> QFrame:
-        # Squelette identique à _build_scanning_state (mêmes marges/espacement,
-        # même texte en haut, même stretch de part et d'autre du "hero" :
-        # c'est ce qui garantit que le loader du scan apparaisse exactement à
-        # la même position/taille que ce bouton, plutôt qu'ailleurs à l'écran.
-        frame = QFrame()
-        frame.setProperty("class", "card")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-
-        desc = QLabel(t("page.performance.empty_desc"))
-        desc.setWordWrap(True)
-        desc.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        desc.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
-        layout.addWidget(desc)
-
-        layout.addStretch(1)
-
-        scan_btn = _PowerButton(t("page.performance.scan_btn"))
-        scan_btn.clicked.connect(self._start_scan)
-        layout.addWidget(scan_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        layout.addStretch(1)
-        return frame
-
-    # ------------------------------------------------------------------
     # État "scan en cours"
     # ------------------------------------------------------------------
     def _build_scanning_state(self) -> QFrame:
+        # Pas de classe "card" ici : le conteneur extérieur commun aux 3
+        # onglets (voir _build_scrollable_tab_container) porte déjà la
+        # bordure/le fond — un second contour imbriqué au même endroit
+        # ferait une double bordure.
         frame = QFrame()
-        frame.setProperty("class", "card")
+        frame.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
@@ -680,27 +1201,39 @@ class PerformancePage(BasePage):
         self._scan_worker.start()
 
     # ------------------------------------------------------------------
-    # Résultats
+    # Résultats — sert aussi d'état initial (avant tout premier scan) : pas
+    # d'écran "Analysez votre PC..." séparé, juste ce même conteneur, vide à
+    # part le bouton d'action tant qu'aucun résultat n'existe encore.
     # ------------------------------------------------------------------
-    def _build_results_container(self) -> QScrollArea:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # QScrollArea peint sa propre viewport avec la couleur de palette Qt
-        # par défaut (pas #1A1A1F) tant qu'on ne la force pas transparente —
-        # c'est ce qui donnait l'impression que les cartes du bas avaient un
-        # fond différent de celles du haut.
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+    def _scan_action_button_text(self) -> str:
+        # "Relancer le diagnostic" dès qu'un résultat existe déjà (généré
+        # dans cette session, ou déjà en mémoire pour une raison quelconque),
+        # "Lancer l'analyse" tant qu'aucun diagnostic n'a encore tourné.
+        return t("page.performance.rescan_btn") if self._last_result is not None else t("page.performance.scan_btn")
 
+    def _build_results_container(self) -> QWidget:
+        # Simple QWidget (pas une QScrollArea) : le défilement est maintenant
+        # géré une seule fois par le conteneur extérieur commun aux 3 onglets
+        # (voir _build_scrollable_tab_container) — imbriquer une deuxième
+        # QScrollArea ici donnerait deux barres de scroll indépendantes.
         self.results_widget = QWidget()
         self.results_widget.setStyleSheet("background: transparent;")
         self.results_layout = QVBoxLayout(self.results_widget)
-        self.results_layout.setContentsMargins(0, 0, 12, 0)
+        # Marge sur les 4 côtés (même valeur que les panneaux Overlay/Risque,
+        # 20px) : sans ça, les cartes de résultats touchaient directement les
+        # bords de la zone de défilement.
+        self.results_layout.setContentsMargins(20, 20, 20, 20)
         self.results_layout.setSpacing(14)
 
-        scroll.setWidget(self.results_widget)
-        scroll.viewport().setStyleSheet("background: transparent;")
-        return scroll
+        # Bouton persistant (jamais recréé/détruit, voir _render_results) :
+        # seul son texte change entre "Lancer l'analyse" et "Relancer le
+        # diagnostic", pas le widget lui-même.
+        self.scan_action_btn = AnimatedButton(self._scan_action_button_text(), variant="secondary")
+        self.scan_action_btn.clicked.connect(self._start_scan)
+        self.results_layout.addWidget(self.scan_action_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self.results_layout.addStretch(1)
+
+        return self.results_widget
 
     def _on_scan_finished(self, result: ScanResult) -> None:
         self.scan_loader.stop()
@@ -709,15 +1242,17 @@ class PerformancePage(BasePage):
         self.scan_stack.setCurrentIndex(self._results_index)
 
     def _render_results(self, result: ScanResult) -> None:
+        # Vide tout SAUF le bouton d'action (jamais détruit, juste retiré du
+        # layout puis réinséré ci-dessous) : un seul et même widget avant et
+        # après le premier scan, pas une recréation à chaque fois.
         while self.results_layout.count():
             item = self.results_layout.takeAt(0)
             widget = item.widget()
-            if widget is not None:
+            if widget is not None and widget is not self.scan_action_btn:
                 widget.deleteLater()
 
-        rescan_btn = AnimatedButton(t("page.performance.rescan_btn"), variant="secondary")
-        rescan_btn.clicked.connect(self._start_scan)
-        self.results_layout.addWidget(rescan_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self.scan_action_btn.setText(self._scan_action_button_text())
+        self.results_layout.addWidget(self.scan_action_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
         # Ordre d'affichage : bloc d'optimisation groupée (juste après le
         # scan, bien visible), puis fiche de configuration, puis composant
@@ -802,7 +1337,7 @@ class PerformancePage(BasePage):
         optimize_row = QHBoxLayout()
         optimize_row.setSpacing(10)
 
-        self.optimize_btn = AnimatedButton(t("page.performance.optimize_btn"), variant="primary")
+        self.optimize_btn = AnimatedButton(t("page.performance.optimize_btn"), variant="secondary")
         self.optimize_btn.clicked.connect(lambda: self._on_optimize_clicked(result))
         optimize_row.addWidget(self.optimize_btn)
 

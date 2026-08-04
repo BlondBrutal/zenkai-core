@@ -369,6 +369,67 @@ QListWidget::item:selected {
     color: #17B897;
 }
 
+/* --- Liste déroulante (sélecteur "Application ciblée" de l'overlay
+   Performance) --- */
+QComboBox {
+    background-color: #202027;
+    border: 1px solid #33333C;
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: #E7E9EE;
+    font-size: 12px;
+}
+
+QComboBox:hover {
+    border: 1px solid #3A3A44;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #9BA1AB;
+    width: 0;
+    height: 0;
+    margin-right: 8px;
+}
+
+/* Le popup est une fenêtre top-level séparée (QComboBoxPrivateContainer) :
+   sans ces règles, il retombe sur le fond clair par défaut du style Fusion
+   au lieu du thème sombre du reste de l'app. */
+QComboBox QAbstractItemView {
+    background-color: #1A1A1F;
+    border: 1px solid #2A2A32;
+    border-radius: 8px;
+    color: #E7E9EE;
+    font-size: 12px;
+    outline: none;
+    padding: 4px;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    /* Hauteur explicite : sans ça, le style Fusion laisse le popup entier
+       (jusqu'à maxVisibleItems lignes) plus haut que le nombre réel
+       d'éléments ne le justifie. */
+    min-height: 22px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: #232329;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background-color: rgba(23, 184, 151, 40);
+    color: #17B897;
+}
+
 /* --- Barres de progression (jauges Performance, scan) --- */
 QProgressBar {
     background-color: #202027;
@@ -391,6 +452,24 @@ QFrame.card {
     background-color: #1F1F25;
     border: 1px solid #2A2A32;
     border-radius: 14px;
+}
+
+/* Bouton d'onglet vertical de la colonne de droite (Diagnostic / Overlay /
+   réservé, page Performance) — voir _NavTabButton dans page_performance.py. */
+QFrame.navTabButton {
+    background-color: #1F1F25;
+    border: 1px solid #2A2A32;
+    border-radius: 10px;
+}
+
+QFrame.navTabButton:hover {
+    background-color: #23232A;
+    border: 1px solid #3A3A44;
+}
+
+QFrame.navTabButton[active="true"] {
+    border: 1px solid #17B897;
+    background-color: rgba(23, 184, 151, 24);
 }
 
 /* Scrollbars : la RoundedScrollBarStyle (ui/scrollbar_style.py, QProxyStyle)

@@ -28,7 +28,7 @@ font que dans les slots connectés, sur le thread GUI.
 """
 import time
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
 from PyQt6.QtWidgets import QPushButton
 
 from pynput import keyboard as pynput_keyboard
@@ -99,6 +99,7 @@ class ActionCaptureWidget(QPushButton):
         self._mouse_listener: pynput_mouse.Listener | None = None
         self._listen_started_at = 0.0
         self._right_click_captured_at = 0.0
+        self._self_global_rect = QRect()
 
         self.clicked.connect(self._start_listening)
         self._captured.connect(self._on_captured)
@@ -178,6 +179,12 @@ class ActionCaptureWidget(QPushButton):
             return
         self._listening = True
         self._listen_started_at = time.monotonic()
+        # Pris ici (thread GUI) une fois pour toutes : _on_click tourne sur
+        # le thread pynput et ne doit jamais interroger la géométrie du
+        # widget directement depuis là (accès Qt hors thread GUI). Un simple
+        # QRect figé suffit, ce bouton ne bouge/redimensionne pas pendant
+        # une capture.
+        self._self_global_rect = QRect(self.mapToGlobal(self.rect().topLeft()), self.size())
         self.setStyleSheet(_LISTENING_STYLE)
         self.setText(t("page.macro.pixel.key_listening"))
         self._kb_listener = pynput_keyboard.Listener(on_press=self._on_key_press)
@@ -202,6 +209,15 @@ class ActionCaptureWidget(QPushButton):
         if not self._listening or not pressed:
             return
         if time.monotonic() - self._listen_started_at < _IGNORE_CLICKS_AFTER_START_S:
+            return
+        if self._self_global_rect.contains(QPoint(int(x), int(y))):
+            # Un clic sur CE bouton "Définir" pendant que sa propre capture
+            # est déjà en cours annule simplement l'écoute, plutôt que de
+            # capturer ce clic comme l'action — un clic ici n'a jamais de
+            # sens comme réaction d'une macro qui cible normalement une
+            # fenêtre de jeu, pas ce bouton lui-même.
+            self._listening = False
+            self._canceled.emit()
             return
         name = _MOUSE_BUTTON_NAMES.get(button)
         if name is None:

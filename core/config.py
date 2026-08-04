@@ -23,6 +23,13 @@ DEFAULT_SETTINGS = {
     "cursor_general_size": 32,
     "cursor_roblox_image_path": "",
     "cursor_roblox_size": 32,
+    "performance_overlay_enabled": False,
+    "performance_overlay_elements": ["cpu", "ram", "gpu", "disk"],
+    "performance_overlay_bg_opacity": 85,
+    "performance_overlay_text_opacity": 100,
+    "performance_overlay_font_size": 13,
+    "performance_overlay_pos_x": None,
+    "performance_overlay_pos_y": None,
 }
 
 

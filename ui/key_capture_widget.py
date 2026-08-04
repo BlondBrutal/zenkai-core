@@ -8,12 +8,18 @@ features/macro_pixel/key_names.py), donc le format doit correspondre
 exactement à ce qu'attendent les écouteurs globaux et les simulateurs.
 """
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import QPushButton
 
 from core.i18n import t
 from features.macro_pixel.key_names import qt_key_to_pydirectinput, qt_mouse_button_to_name
 
 _LISTENING_STYLE = "QPushButton { color: #17B897; border-color: #17B897; }"
+# Padding horizontal total de .hotkeyCaptureButton (voir theme.qss : "padding:
+# 4px 18px") : à soustraire de la largeur du bouton pour élider le texte au
+# bon endroit plutôt que de laisser Qt le couper net sans "…" (QPushButton
+# n'élide jamais tout seul).
+_TEXT_HORIZONTAL_PADDING = 36
 
 _MOUSE_LABEL_KEYS = {
     "mouse_left": "page.macro.pixel.key_mouse_left",
@@ -70,6 +76,8 @@ class KeyCaptureWidget(QPushButton):
         self._refresh_text()
 
     def _start_listening(self) -> None:
+        if self._listening:
+            return
         self._listening = True
         self.setStyleSheet(_LISTENING_STYLE)
         self.setText(t("page.macro.pixel.key_listening"))
@@ -110,9 +118,12 @@ class KeyCaptureWidget(QPushButton):
         if name is None:
             return
         if self._exclude_click_buttons and name in _RESERVED_FOR_UI:
-            # Ignoré silencieusement : reste en écoute, ce clic garde son
-            # usage normal (ex: recliquer sur ce bouton par réflexe) plutôt
-            # que d'être capturé comme touche de déclenchement.
+            # Ce bouton ("Définir") ne peut de toute façon jamais capturer
+            # clic gauche/droit ici (voir _RESERVED_FOR_UI) : un clic dessus
+            # pendant l'écoute ne peut donc être qu'une tentative d'annuler,
+            # jamais une capture valide — annule plutôt que d'ignorer
+            # silencieusement (qui laissait l'écoute tourner indéfiniment).
+            self._stop_listening()
             return
         self._apply_captured(name)
 
@@ -138,4 +149,14 @@ class KeyCaptureWidget(QPushButton):
         super().focusOutEvent(event)
 
     def _refresh_text(self) -> None:
-        self.setText(display_label(self._key) if self._key else t("page.macro.pixel.key_placeholder"))
+        full_text = display_label(self._key) if self._key else t("page.macro.pixel.key_placeholder")
+        available_width = max(0, self.width() - _TEXT_HORIZONTAL_PADDING)
+        metrics = QFontMetrics(self.font())
+        self.setText(metrics.elidedText(full_text, Qt.TextElideMode.ElideRight, available_width))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Réélide une fois la taille finale connue : au tout premier
+        # _refresh_text() (appelé depuis __init__), setFixedSize() n'a
+        # souvent pas encore été appliqué par l'appelant.
+        self._refresh_text()

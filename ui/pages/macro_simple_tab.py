@@ -57,17 +57,18 @@ from ui.trash_icon_button import TrashIconButton
 
 MAX_SLOTS = 10
 _FIELD_HEIGHT = 32
-_LABEL_GAP = 6  # -10%
+_LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # Largeurs fixes pour une rangée régulière (même principe que
 # _HEX_FIELD_WIDTH/_COORD_FIELD_WIDTH dans macro_pixel_tab.py) plutôt que de
 # laisser chaque champ prendre sa largeur naturelle (StyledDropdown/QSpinBox
 # et KeyCaptureWidget n'ont pas la même largeur "par défaut", ce qui donnait
-# des écarts irréguliers entre colonnes). 150 (pas 100) : mesuré pour que
-# "XButton1"/"XButton2" (les libellés courts les plus longs qu'un
-# KeyCaptureWidget puisse afficher, voir key_capture_widget.py) tiennent sans
-# troncature — sizeHint réel avec le style .neutralButton appliqué = 142px.
-_HOTKEY_FIELD_WIDTH = 150
-_MODE_FIELD_WIDTH = 150
+# des écarts irréguliers entre colonnes). Réduits de 25% (150 -> 112) par
+# rapport à la valeur d'origine mesurée pour "XButton1"/"XButton2" sans
+# troncature : à cette largeur réduite, KeyCaptureWidget/StyledDropdown
+# élident maintenant proprement (voir _refresh_text dans les deux classes)
+# plutôt que de couper le texte n'importe où.
+_HOTKEY_FIELD_WIDTH = 112
+_MODE_FIELD_WIDTH = 112
 _REPEAT_FIELD_WIDTH = 70
 _LOOP_DELAY_FIELD_WIDTH = 90
 
@@ -223,7 +224,7 @@ class MacroSimpleSlot(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(9)  # -10%
+        layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         control_row = self._build_control_row()
 
@@ -255,7 +256,7 @@ class MacroSimpleSlot(QWidget):
     # ------------------------------------------------------------------
     def _build_header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(7)  # -10%
+        row.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         self.slot_title_label = QLabel()
         self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
@@ -328,11 +329,11 @@ class MacroSimpleSlot(QWidget):
         # partout, sans addSpacing() séparé).
         row.setSpacing(0)
         row.addWidget(_labeled_column(t("page.macro.simple.hotkey_label"), self.hotkey_capture))
-        row.addSpacing(9)  # -10%
+        row.addSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addWidget(_labeled_column(t("page.macro.simple.mode_label"), self.mode_combo))
         # Même écart qu'entre Activer et Mode ci-dessus (uniforme sur toute
         # la ligne).
-        row.addSpacing(9)  # -10%
+        row.addSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addWidget(self.repeat_field)
         row.addWidget(self.loop_delay_field)
         row.addStretch(1)
@@ -360,7 +361,7 @@ class MacroSimpleSlot(QWidget):
         self.view_coords_btn.clicked.connect(self._on_view_coords_clicked)
 
         row = QHBoxLayout()
-        row.setSpacing(9)  # -10%
+        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addWidget(self.record_btn)
         row.addWidget(self.view_coords_btn)
         row.addWidget(self.record_status_label)
@@ -545,7 +546,7 @@ class MacroSimpleSlot(QWidget):
 
     def _build_control_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(9)  # -10%
+        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         self.start_toggle = ToggleSwitch(checked=False)
         self.start_toggle.toggled.connect(self._on_start_toggle)
@@ -657,6 +658,31 @@ class MacroSimpleSlot(QWidget):
                 if container is not None:
                     container.layout().setContentsMargins(0, top, 0, self._ROW_MARGIN)
 
+    def _build_cell_spin(self, value: int, minimum: int, maximum: int, center_text: bool = False) -> QSpinBox:
+        """QSpinBox pour une cellule du tableau (X/Y/Appui/Délai) : simple,
+        sans event filter ni logique de blocage de clic. `_NoWheelSpinBox`
+        ne surcharge QUE wheelEvent (empêche la molette de changer la valeur
+        sans clic, voir sa docstring) — clic et saisie clavier restent le
+        comportement par défaut d'un QSpinBox, jamais intercepté. NoButtons
+        (pas de flèches +/-) : à ces largeurs de colonne, elles ne laissaient
+        quasiment plus de place au nombre lui-même. NoContextMenu : sans ça,
+        un clic droit affiche le menu d'édition natif de Qt (Couper/Copier/
+        Coller) EN PLUS de notre menu "Ajouter une étape"/"Supprimer cette
+        étape" — l'évènement ignoré remonte alors au tableau parent
+        (vérifié : la position transmise est bien traduite dans son repère,
+        table.rowAt() retrouve la bonne ligne), qui affiche seulement notre
+        menu personnalisé."""
+        spin = _NoWheelSpinBox()
+        spin.setProperty("class", "tableCellSpin")
+        spin.setRange(minimum, maximum)
+        spin.setValue(value)
+        spin.setFixedHeight(self._CELL_HEIGHT)
+        spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        spin.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        if center_text:
+            spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return spin
+
     def _add_step_row(self, step: MacroStep, at_row: int | None = None) -> int:
         row = self.table.rowCount() if at_row is None else at_row
         self.table.insertRow(row)
@@ -680,50 +706,16 @@ class MacroSimpleSlot(QWidget):
             self._wrap_centered(current_pos_toggle, self._ROW_MARGIN, self._ROW_MARGIN, center=True),
         )
 
-        # Pas de flèches +/- : à cette largeur de colonne, elles ne
-        # laissaient quasiment plus de place au nombre lui-même (valeur
-        # illisible bien que correcte — vérifié via .value()/.text()).
-        # NoContextMenu sur chaque spinbox de cellule : sans ça, un clic droit
-        # dessus affiche le menu d'édition natif de Qt (Couper/Copier/
-        # Coller/Sélectionner tout) EN PLUS de notre menu "Ajouter une
-        # étape"/"Supprimer cette étape" — ignoré, l'évènement remonte au
-        # tableau parent (vérifié empiriquement : la position transmise est
-        # bien traduite dans le repère du tableau, table.rowAt() retrouve la
-        # bonne ligne), qui affiche alors seulement notre menu personnalisé.
-        x_spin = _NoWheelSpinBox()
-        x_spin.setProperty("class", "tableCellSpin")
-        x_spin.setRange(-10000, 10000)
-        x_spin.setValue(step.x)
-        x_spin.setFixedHeight(self._CELL_HEIGHT)
-        x_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        x_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        x_spin.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        x_spin = self._build_cell_spin(step.x, -10000, 10000, center_text=True)
         self.table.setCellWidget(row, COL_X, self._wrap_centered(x_spin, self._ROW_MARGIN, self._ROW_MARGIN))
 
-        y_spin = _NoWheelSpinBox()
-        y_spin.setProperty("class", "tableCellSpin")
-        y_spin.setRange(-10000, 10000)
-        y_spin.setValue(step.y)
-        y_spin.setFixedHeight(self._CELL_HEIGHT)
-        y_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        y_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        y_spin.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        y_spin = self._build_cell_spin(step.y, -10000, 10000, center_text=True)
         self.table.setCellWidget(row, COL_Y, self._wrap_centered(y_spin, self._ROW_MARGIN, self._ROW_MARGIN))
 
-        hold_spin = _NoWheelSpinBox()
-        hold_spin.setProperty("class", "tableCellSpin")
-        hold_spin.setRange(0, 600000)
-        hold_spin.setValue(step.hold_ms)
-        hold_spin.setFixedHeight(self._CELL_HEIGHT)
-        hold_spin.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        hold_spin = self._build_cell_spin(step.hold_ms, 0, 600000)
         self.table.setCellWidget(row, COL_HOLD, self._wrap_centered(hold_spin, self._ROW_MARGIN, self._ROW_MARGIN))
 
-        delay_spin = _NoWheelSpinBox()
-        delay_spin.setProperty("class", "tableCellSpin")
-        delay_spin.setRange(0, 600000)
-        delay_spin.setValue(step.delay_after_ms)
-        delay_spin.setFixedHeight(self._CELL_HEIGHT)
-        delay_spin.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        delay_spin = self._build_cell_spin(step.delay_after_ms, 0, 600000)
         self.table.setCellWidget(row, COL_DELAY, self._wrap_centered(delay_spin, self._ROW_MARGIN, self._ROW_MARGIN))
 
         self._update_row_enabled_state(row)
@@ -745,20 +737,22 @@ class MacroSimpleSlot(QWidget):
                 return
 
     def _update_row_enabled_state(self, row: int) -> None:
-        action_capture = self._cell_widget(row, COL_ACTION)
         x_spin = self._cell_widget(row, COL_X)
         y_spin = self._cell_widget(row, COL_Y)
         current_pos_toggle = self._cell_widget(row, COL_CURRENT_POS)
-        is_mouse = action_capture.action() == ACTION_MOUSE
-        # La capture de touche (ActionCaptureWidget) et la position X/Y sont
-        # deux actions totalement indépendantes : capturer un clic ne doit
-        # JAMAIS écraser X/Y avec les coordonnées de CE clic (contrairement
-        # au comportement précédent) — seuls l'action (clavier/souris) et le
-        # toggle "Position actuelle" ci-dessous déterminent si X/Y sont
-        # éditables.
-        use_current_position = is_mouse and current_pos_toggle.isChecked()
-        x_spin.setEnabled(is_mouse and not use_current_position)
-        y_spin.setEnabled(is_mouse and not use_current_position)
+        # X/Y restent TOUJOURS cliquables/éditables, quelle que soit l'action
+        # de la ligne (clavier, souris, ou pas encore définie) — seul le
+        # toggle "Curseur" les désactive, seule raison légitime de ne pas
+        # s'en servir (l'action se joue alors à la position actuelle du
+        # curseur). Les lier en plus au type d'action (comme avant) rendait
+        # ce champ mystérieusement désactivé selon ce qui était capturé dans
+        # une AUTRE colonne, ce qui ressemblait à un bug de saisie — alors
+        # que _row_to_step remet déjà x=y=0 à la sauvegarde si l'action
+        # n'est pas une souris, donc aucune valeur non pertinente n'est
+        # jamais persistée/rejouée.
+        use_current_position = current_pos_toggle.isChecked()
+        x_spin.setEnabled(not use_current_position)
+        y_spin.setEnabled(not use_current_position)
 
     def _row_to_step(self, row: int) -> MacroStep:
         action_capture = self._cell_widget(row, COL_ACTION)
@@ -980,16 +974,16 @@ class MacroSimpleSlot(QWidget):
         self.macro_saved.emit()
 
     def _on_reset_clicked(self) -> None:
-        if self._last_saved is not None:
-            self.load_macro(self._last_saved)
-        else:
-            self._reset_to_blank()
+        # Vide ce qui est actuellement affiché à l'écran, jamais le fichier
+        # déjà sauvegardé : `_last_saved` (voir _on_save_clicked/load_macro)
+        # n'est PAS touché ici, donc rien n'écrase la dernière sauvegarde sur
+        # le disque tant que l'utilisateur ne clique pas explicitement sur
+        # "Sauvegarder" après ce reset. Revenir à `_last_saved` (l'ancien
+        # comportement) rechargeait la sauvegarde au lieu de vider l'écran —
+        # ce que "Réinitialiser" ne doit jamais faire.
+        self._reset_to_blank()
 
     def _reset_to_blank(self) -> None:
-        """Aucune sauvegarde existante (nouvel emplacement jamais encore
-        enregistré) : "Réinitialiser" vide alors complètement la config
-        plutôt que de ne rien faire (il n'y a pas de _last_saved vers lequel
-        revenir)."""
         self._stop_listener()
         self.name_input.clear()
         self.hotkey_capture.set_key("")
@@ -1053,7 +1047,7 @@ class SimpleSlotChooserDialog(QDialog):
         # Charger / Annuler : même style pour les deux (pas de distinction
         # primaire/secondaire ici), centrés côte à côte, "Charger" à gauche.
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(7)  # -20% puis -10% (10px -> 8px -> 7px)
+        btn_row.setSpacing(6)  # -20% puis -10% x2 (10px -> 8px -> 7px -> 6px)
         btn_row.addStretch(1)
         confirm_btn = QPushButton(t("page.macro.simple.slot_chooser_confirm"))
         confirm_btn.setProperty("class", "secondaryButton")

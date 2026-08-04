@@ -53,14 +53,13 @@ from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 from ui.toggle_switch import ToggleSwitch
 from ui.trash_icon_button import TrashIconButton
 
-_SWATCH_SIZE = 28
 _FIELD_HEIGHT = 32
 # Largeurs ajustées au contenu attendu (6 caractères hexa, jusqu'à
 # "-99999" pour les coordonnées) plutôt qu'un espace vide inutile.
 _HEX_FIELD_WIDTH = 68
 _COORD_FIELD_WIDTH = 64
 # Espacement label -> élément associé (x1.2 par rapport aux 6px d'origine).
-_LABEL_GAP = 6  # -10%
+_LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 _HEX_RE = re.compile(r"[^0-9A-Fa-f]")
 
 MAX_SLOTS = 3
@@ -117,7 +116,7 @@ class PixelMacroSlot(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(9)  # -10%
+        layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         control_row = self._build_control_row()
 
@@ -140,7 +139,7 @@ class PixelMacroSlot(QWidget):
     # ------------------------------------------------------------------
     def _build_header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(7)  # -10%
+        row.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         self.slot_title_label = QLabel()
         self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
@@ -199,21 +198,13 @@ class PixelMacroSlot(QWidget):
         pick_row.addStretch(1)
         section.addLayout(pick_row)
 
+        # Même hauteur que les champs voisins (Couleur/Pixel X/Pixel Y),
+        # pas un petit carré plaqué en haut d'un conteneur de cette hauteur :
+        # plus besoin de conteneur intermédiaire pour centrer/aligner
+        # puisque sa taille correspond déjà exactement à la leur.
         self.color_swatch = QFrame()
-        self.color_swatch.setFixedSize(_SWATCH_SIZE, _SWATCH_SIZE)
+        self.color_swatch.setFixedSize(_FIELD_HEIGHT, _FIELD_HEIGHT)
         self.color_swatch.setStyleSheet(_swatch_style(None))
-
-        # Le carré (28px) est plus petit que la hauteur des champs voisins
-        # (_FIELD_HEIGHT=32px) : un conteneur de hauteur fixe identique avec
-        # un stretch égal au-dessus et en dessous le centre verticalement
-        # par rapport à eux, au lieu de le laisser plaqué en haut.
-        swatch_container = QWidget()
-        swatch_container.setFixedHeight(_FIELD_HEIGHT)
-        swatch_layout = QVBoxLayout(swatch_container)
-        swatch_layout.setContentsMargins(0, 0, 0, 0)
-        swatch_layout.addStretch(1)
-        swatch_layout.addWidget(self.color_swatch)
-        swatch_layout.addStretch(1)
 
         self.hex_input = QLineEdit()
         self.hex_input.setFixedWidth(_HEX_FIELD_WIDTH)
@@ -236,7 +227,7 @@ class PixelMacroSlot(QWidget):
         # l'aperçu lui-même) : une chaîne vide plutôt qu'un label absent,
         # pour que sa colonne garde la même hauteur de départ que ses
         # voisines (Couleur/Pixel X/Pixel Y) et reste alignée avec elles.
-        columns_row.addLayout(self._labeled_column("", swatch_container))
+        columns_row.addLayout(self._labeled_column("", self.color_swatch))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.color_label"), self.hex_input))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_x_label"), self.x_input))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_y_label"), self.y_input))
@@ -269,7 +260,7 @@ class PixelMacroSlot(QWidget):
         self.swap_key_capture.keyChanged.connect(lambda _key: self._sync_swap_listener())
 
         row = QHBoxLayout()
-        row.setSpacing(9)  # -10%
+        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addLayout(self._labeled_column(t("page.macro.pixel.reaction1_label"), self.key_capture))
         row.addLayout(self._labeled_column(t("page.macro.pixel.reaction2_label"), self.swap_target_capture))
         row.addLayout(self._labeled_column(t("page.macro.pixel.swap_key_label"), self.swap_key_capture))
@@ -293,7 +284,7 @@ class PixelMacroSlot(QWidget):
 
     def _build_control_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setSpacing(9)  # -10%
+        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         self.start_toggle = ToggleSwitch(checked=False)
         self.start_toggle.toggled.connect(self._on_start_toggle)
@@ -588,10 +579,11 @@ class SlotChooserDialog(QDialog):
 
         # Charger / Annuler : même style pour les deux (pas de distinction
         # primaire/secondaire ici), centrés côte à côte, "Charger" à gauche.
-        # Espacement réduit de 20% puis 10% (10px -> 8px -> 7px, même valeur
-        # que macro_simple_tab.SimpleSlotChooserDialog pour rester cohérent).
+        # Espacement réduit de 20% puis 10% x2 (10px -> 8px -> 7px -> 6px,
+        # même valeur que macro_simple_tab.SimpleSlotChooserDialog pour
+        # rester cohérent).
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(7)
+        btn_row.setSpacing(6)
         btn_row.addStretch(1)
         confirm_btn = QPushButton(t("page.macro.pixel.slot_chooser_confirm"))
         confirm_btn.setProperty("class", "secondaryButton")

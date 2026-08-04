@@ -18,7 +18,13 @@ cadre natif carré).
 import time
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import QMenu, QPushButton
+
+# Padding horizontal total de .neutralButton (voir theme.qss : "padding: 10px
+# 18px") : à soustraire de la largeur du bouton pour savoir combien de place
+# reste réellement pour le texte avant de devoir le tronquer.
+_TEXT_HORIZONTAL_PADDING = 36
 
 # Un clic sur CE bouton pendant que son propre menu est déjà ouvert ferme le
 # menu (clic hors de son rectangle, capté par le grab souris du QMenu) — mais
@@ -93,8 +99,26 @@ class StyledDropdown(QPushButton):
         self.currentIndexChanged.emit(index)
 
     def _refresh_text(self) -> None:
-        if 0 <= self._current_index < len(self._labels):
-            self.setText(f"{self._labels[self._current_index]}  ▾")
+        if not (0 <= self._current_index < len(self._labels)):
+            return
+        full_text = f"{self._labels[self._current_index]}  ▾"
+        # QPushButton ne tronque JAMAIS son texte tout seul (contrairement à
+        # QLabel avec certains modes) : sans ceci, un texte trop long pour la
+        # largeur du bouton serait juste coupé net par le moteur de rendu,
+        # sans "…" et parfois en coupant par le milieu selon l'espace
+        # restant. elidedText(..., ElideRight, ...) coupe explicitement à LA
+        # FIN (le début du texte reste toujours visible) et ajoute "…".
+        available_width = max(0, self.width() - _TEXT_HORIZONTAL_PADDING)
+        metrics = QFontMetrics(self.font())
+        elided = metrics.elidedText(full_text, Qt.TextElideMode.ElideRight, available_width)
+        self.setText(elided)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Réélide au bon endroit une fois la taille finale connue : au
+        # moment du tout premier _refresh_text() (appelé depuis addItem()),
+        # setFixedSize() n'a souvent pas encore été appliqué par l'appelant.
+        self._refresh_text()
 
     def _open_menu(self) -> None:
         if not self._labels:
