@@ -114,7 +114,8 @@
       "Bash(rm -f out_revert.log)",
       "Bash(where nvidia-smi *)",
       "Read(//c/Program Files/NVIDIA Corporation/NVSMI/**)",
-      "Bash(rm -f out_30s.log out_other.log)"
+      "Bash(rm -f out_30s.log out_other.log)",
+      "Bash(pip show *)"
     ]
   }
 }
