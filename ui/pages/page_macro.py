@@ -195,8 +195,6 @@ class MacroPage(BasePage):
 
         # Kill switch global, au même niveau que le titre, aligné à droite.
         self.header_layout().addWidget(self._build_kill_switch_control())
-        self.content_layout().addWidget(self._build_kill_switch_status_label())
-        self.content_layout().addSpacing(8)
 
         # --- Colonne gauche (onglets + contenu) et colonne Bibliothèque, dans
         # une même rangée : la Bibliothèque démarre ainsi à la même hauteur
@@ -329,16 +327,8 @@ class MacroPage(BasePage):
 
         return wrapper
 
-    def _build_kill_switch_status_label(self) -> QLabel:
-        initial_enabled = bool(config.get("macros_globally_enabled", True))
-        self.kill_switch_status_label = QLabel(t("page.macro.kill_switch_off"))
-        self.kill_switch_status_label.setStyleSheet(f"font-size: 11px; color: {STATUS_NEUTRAL};")
-        self.kill_switch_status_label.setVisible(not initial_enabled)
-        return self.kill_switch_status_label
-
     def _on_kill_switch_toggled(self, checked: bool) -> None:
         config.set("macros_globally_enabled", checked)
-        self.kill_switch_status_label.setVisible(not checked)
         if not checked:
             self.pixel_tab.stop_if_running()
             self.simple_tab.stop_if_running()
@@ -347,9 +337,18 @@ class MacroPage(BasePage):
     def _build_placeholder(self) -> QWidget:
         # Le texte descriptif de ce type de macro est déjà donné par le badge
         # "?" du sous-onglet correspondant — le répéter ici ferait doublon.
+        # Seule la mention "bientôt disponible" est nouvelle : sans elle, cet
+        # onglet paraît cassé/vide plutôt que "pas encore construit".
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 32, 0, 0)
+
+        label = QLabel(t("page.macro.tab3_placeholder"))
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        label.setWordWrap(True)
+        label.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {STATUS_NEUTRAL};")
+        layout.addWidget(label)
+
         layout.addStretch(1)
         return widget
 

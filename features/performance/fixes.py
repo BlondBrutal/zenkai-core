@@ -13,14 +13,30 @@ un seul geste explicite, limité à cette action précise).
 import ctypes
 import logging
 import subprocess
+import sys
 import winreg
 from ctypes import wintypes
 
+from core.elevation import is_admin
 from features.performance.status_cards import HIGH_PERFORMANCE_GUID
 
 logger = logging.getLogger("zenkaiontop.performance")
 
 _UAC_TIMEOUT_MS = 120_000  # le temps de répondre au prompt UAC ne doit pas nous faire abandonner trop tôt
+
+
+def _hidden_subprocess_kwargs() -> dict:
+    """creationflags/startupinfo pour ne jamais afficher de fenêtre de
+    console (CREATE_NO_WINDOW seul suffit généralement, le STARTUPINFO
+    SW_HIDE est là pour plus de fiabilité — même technique que
+    features/performance/live_monitor.py, voir sa docstring pour le bug que
+    ça corrige : une fenêtre de console visible, en boucle)."""
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {"creationflags": subprocess.CREATE_NO_WINDOW, "startupinfo": startupinfo}
 
 
 class _ShellExecuteInfo(ctypes.Structure):
@@ -47,7 +63,23 @@ def _run_elevated_powershell(command: str) -> bool:
     """Lance une commande PowerShell avec élévation UAC (prompt Windows natif),
     attend sa fin, et retourne True si son code de sortie vaut 0. Si
     l'utilisateur refuse le prompt UAC, ShellExecuteExW échoue directement
-    (traité comme un échec de la correction, pas une exception)."""
+    (traité comme un échec de la correction, pas une exception).
+
+    Si le process courant est déjà élevé (voir core/elevation.py — l'app
+    entière se relance en admin au démarrage), un simple subprocess.run
+    suffit : pas besoin de redemander un prompt UAC individuel ici."""
+    if is_admin():
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command", command],
+                capture_output=True, timeout=_UAC_TIMEOUT_MS / 1000,
+                **_hidden_subprocess_kwargs(),
+            )
+            return result.returncode == 0
+        except Exception as exc:
+            logger.error("Échec de la commande PowerShell (déjà élevé) : %s", exc)
+            return False
+
     see = _ShellExecuteInfo()
     see.cbSize = ctypes.sizeof(_ShellExecuteInfo)
     see.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS : on récupère hProcess pour attendre la fin
@@ -75,6 +107,7 @@ def set_power_plan_high_performance() -> bool:
         result = subprocess.run(
             ["powercfg", "/setactive", HIGH_PERFORMANCE_GUID],
             capture_output=True, text=True, timeout=5, errors="replace",
+            **_hidden_subprocess_kwargs(),
         )
         return result.returncode == 0
     except Exception as exc:

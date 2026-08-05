@@ -43,7 +43,7 @@ class RiskControlsPanel(QFrame):
         self.setStyleSheet("background: transparent;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
         toggle_row = QHBoxLayout()

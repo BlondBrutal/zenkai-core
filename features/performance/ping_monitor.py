@@ -11,6 +11,7 @@ assigné à la session en cours.
 import logging
 import re
 import subprocess
+import sys
 import time
 from typing import Optional
 
@@ -22,6 +23,20 @@ logger = logging.getLogger("zenkaiontop.performance")
 _PING_INTERVAL_SECONDS = 1.5
 _PING_TIMEOUT_MS = 1000
 _TIME_PATTERN = re.compile(r"(?:temps|time)[<=](\d+)\s*ms", re.IGNORECASE)
+
+
+def _hidden_subprocess_kwargs() -> dict:
+    """creationflags/startupinfo pour ne jamais afficher de fenêtre de
+    console (CREATE_NO_WINDOW seul suffit généralement, le STARTUPINFO
+    SW_HIDE est là pour plus de fiabilité) — ce ping tourne en boucle tant
+    que l'overlay affiche l'élément "Ping", même principe que le bug
+    nvidia-smi corrigé dans live_monitor.py."""
+    if sys.platform != "win32":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {"creationflags": subprocess.CREATE_NO_WINDOW, "startupinfo": startupinfo}
 
 
 class PingMonitorThread(QThread):
@@ -78,7 +93,7 @@ class PingMonitorThread(QThread):
                 capture_output=True,
                 text=True,
                 timeout=(_PING_TIMEOUT_MS / 1000) + 1,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                **_hidden_subprocess_kwargs(),
             )
             match = _TIME_PATTERN.search(result.stdout)
             if match:

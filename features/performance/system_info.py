@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import winreg
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +17,25 @@ from typing import Optional
 import psutil
 
 logger = logging.getLogger("zenkaiontop.performance")
+
+
+def _run_hidden(args: list[str], timeout: float = 5) -> "subprocess.CompletedProcess[str]":
+    """subprocess.run sans jamais afficher de fenêtre de console : creationflags
+    CREATE_NO_WINDOW seul suffit généralement, mais on ajoute aussi le
+    STARTUPINFO (STARTF_USESHOWWINDOW + SW_HIDE) pour plus de fiabilité (même
+    technique que features/performance/live_monitor.py, voir sa docstring
+    pour le bug — fenêtre de console visible — que ça corrige)."""
+    creationflags = 0
+    startupinfo = None
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+    return subprocess.run(
+        args, capture_output=True, text=True, timeout=timeout, errors="replace",
+        creationflags=creationflags, startupinfo=startupinfo,
+    )
 
 
 @dataclass
@@ -110,10 +130,7 @@ def _get_power_plan() -> tuple[Optional[str], Optional[str]]:
     langue de Windows, contrairement au nom ("Haute performance" / "High
     performance" / ...) : c'est lui qu'on compare pour juger du statut."""
     try:
-        result = subprocess.run(
-            ["powercfg", "/getactivescheme"],
-            capture_output=True, text=True, timeout=5, errors="replace",
-        )
+        result = _run_hidden(["powercfg", "/getactivescheme"])
         output = result.stdout.strip()
         guid_match = re.search(r"([0-9a-fA-F-]{36})", output)
         name_match = re.search(r"\(([^)]+)\)\s*$", output)

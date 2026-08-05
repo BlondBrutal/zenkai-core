@@ -101,7 +101,20 @@
       "Bash(git status *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(rm -f out_spinner.log out_spinner2.log out_slider.log out_branches.log out_overlay.log)",
+      "Bash(rm -f \"C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Blond-Downloads-Roblox-ZenkaiOnTop\\\\92d0cf03-3de8-4ac9-881c-6279fa8ecc45\\\\scratchpad\"/*)",
+      "Bash(rm -f out_wheel.log out_scroll.log)",
+      "Bash(rm -f out_round.log out_visual.log out_debug100.log out_full.log)",
+      "Bash(rm -f out_reduced.log)",
+      "Bash(rm -f out_combo.log)",
+      "Bash(rm -f out_task.log)",
+      "Bash(rm -f out_vmargin.log out_vmargin2.log out_final_scroll.log out_pw.log out_task2.log)",
+      "Bash(rm -f out_loop.log out_regress.log out_regress2.log out_selfheal.log)",
+      "Bash(rm -f out_revert.log)",
+      "Bash(where nvidia-smi *)",
+      "Read(//c/Program Files/NVIDIA Corporation/NVSMI/**)",
+      "Bash(rm -f out_30s.log out_other.log)"
     ]
   }
 }

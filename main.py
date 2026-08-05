@@ -17,6 +17,33 @@ from core.i18n import set_language
 
 
 def main() -> int:
+    if sys.platform == "win32":
+        # Tout premier appel du process, avant même QApplication : empêche
+        # Windows d'afficher sa fenêtre "fantôme" par défaut (fond
+        # Mica/acrylique générique, titre = chemin brut de l'exécutable)
+        # pendant que le process démarre — un comportement natif du shell
+        # pour tout process GUI lent à créer sa première fenêtre, qui
+        # n'a rien à voir avec nos propres attributs de fenêtre (déjà posés
+        # avant tout show(), voir ui/splash.py) et qu'aucun réglage sur nos
+        # fenêtres ne peut donc supprimer — seule cette API Win32 le peut.
+        import ctypes
+        try:
+            ctypes.windll.user32.DisableProcessWindowsGhosting()
+        except OSError:
+            pass
+
+        # Élévation UAC classique, redemandée à chaque lancement tant que le
+        # process n'est pas déjà admin (voir core/elevation.py — le
+        # mécanisme à base de tâche planifiée essayé ici a été reverti après
+        # avoir provoqué une boucle d'ouverture/fermeture rapide sur
+        # certaines configurations Windows). Si l'utilisateur refuse le
+        # prompt, on continue quand même sans droits admin : PresentMon/le
+        # correctif SysMain redemanderont alors individuellement.
+        from core.elevation import is_admin, relaunch_as_admin
+
+        if not is_admin() and relaunch_as_admin():
+            return 0
+
     setup_logging()
     set_language(config.get("language", "fr"))
 

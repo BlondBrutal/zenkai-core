@@ -114,18 +114,20 @@ class RoundedScrollBarStyle(QProxyStyle):
 # ont un border-radius = moitié de l'épaisseur (5px pour 10px) : les deux
 # bouts (haut/bas) sont donc de vraies demi-cercles, pas juste des coins
 # arrondis à angle.
-_DIRECT_SCROLLBAR_QSS = f"""
+def _direct_scrollbar_qss(thickness: int, min_handle_length: int, margin: str) -> str:
+    radius = thickness // 2
+    return f"""
 QScrollBar:vertical {{
     background: {_GROOVE_COLOR.name()};
-    width: {_THICKNESS}px;
-    margin: 0px;
+    width: {thickness}px;
+    margin: {margin};
     border: none;
-    border-radius: {_THICKNESS // 2}px;
+    border-radius: {radius}px;
 }}
 QScrollBar::handle:vertical {{
     background: {_HANDLE_COLOR.name()};
-    min-height: {_MIN_HANDLE_LENGTH}px;
-    border-radius: {_THICKNESS // 2}px;
+    min-height: {min_handle_length}px;
+    border-radius: {radius}px;
 }}
 QScrollBar::handle:vertical:hover {{
     background: {_HANDLE_HOVER_COLOR.name()};
@@ -150,13 +152,22 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
    border-radius déjà posé sur le cadre englobant. */
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
     background-color: {_GROOVE_COLOR.name()};
-    border-radius: {_THICKNESS // 2}px;
+    border-radius: {radius}px;
 }}
 """
 
 
-def style_scrollbar_directly(bar: QScrollBar) -> None:
+_DIRECT_SCROLLBAR_QSS = _direct_scrollbar_qss(_THICKNESS, _MIN_HANDLE_LENGTH, "0px")
+
+
+def style_scrollbar_directly(
+    bar: QScrollBar, *, thickness: int = _THICKNESS, min_handle_length: int = _MIN_HANDLE_LENGTH,
+    margin: str = "0px",
+) -> None:
     """À appeler explicitement sur une scrollbar dont le rendu QProxyStyle
     ne prend pas (piste invisible, extrémités carrées) : garantit le rendu
-    peu importe la cascade de style, en se posant directement sur l'instance."""
-    bar.setStyleSheet(_DIRECT_SCROLLBAR_QSS)
+    peu importe la cascade de style, en se posant directement sur l'instance.
+    `thickness`/`min_handle_length`/`margin` par défaut = look app-wide
+    inchangé ; PerformancePage passe des valeurs plus généreuses pour ses 3
+    onglets (barre plus épaisse, détachée du bord droit)."""
+    bar.setStyleSheet(_direct_scrollbar_qss(thickness, min_handle_length, margin))

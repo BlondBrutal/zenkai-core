@@ -3,12 +3,25 @@ Monitoring des performances en direct (CPU, RAM, GPU, disque). Tourne dans
 un QThread séparé, rafraîchissement ~3x/seconde (CPU/RAM/disque) tant que
 la page Performance est affichée et activée.
 
-Le GPU est interrogé moins souvent que le reste : GPUtil relance un vrai
-sous-processus nvidia-smi.exe à chaque appel (voir _read_gpu_load), donc le
-faire 3x/seconde serait tout sauf léger. On le rafraîchit à ~1x/seconde en
+Le GPU est interrogé moins souvent que le reste : lire sa charge relance un
+vrai sous-processus nvidia-smi.exe à chaque appel (voir _read_gpu_load), donc
+le faire 3x/seconde serait tout sauf léger. On le rafraîchit à ~1x/seconde en
 réutilisant la dernière valeur connue entre-temps.
+
+nvidia-smi est appelé nous-mêmes directement (pas via le package GPUtil,
+dont la fonction getGPUs() lance ce même sous-processus SANS masquer sa
+fenêtre — une console visible s'ouvrait donc et se refermait à chaque
+rafraîchissement GPU, en boucle tant que le monitoring en direct tournait,
+voir _read_gpu_load) : on garde le même format de sortie CSV que GPUtil
+pour rester équivalent, mais avec creationflags=CREATE_NO_WINDOW +
+STARTUPINFO(SW_HIDE) — la combinaison la plus fiable pour ne jamais
+laisser apparaître de fenêtre, même brièvement.
 """
 import logging
+import os
+import shutil
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -166,13 +179,55 @@ def _read_battery() -> tuple[Optional[float], bool]:
         return None, False
 
 
+def _find_nvidia_smi() -> Optional[str]:
+    path = shutil.which("nvidia-smi")
+    if path:
+        return path
+    # Repli identique à celui de GPUtil : nvidia-smi n'est pas toujours sur
+    # le PATH, mais réside presque toujours ici sur une install NVIDIA standard.
+    fallback = os.path.join(
+        os.environ.get("systemdrive", "C:"), "Program Files", "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"
+    )
+    return fallback if os.path.isfile(fallback) else None
+
+
+def _run_hidden(args: list[str]) -> Optional[str]:
+    """subprocess.run sans jamais afficher de fenêtre : creationflags
+    CREATE_NO_WINDOW seul suffit généralement, mais on ajoute aussi le
+    STARTUPINFO (STARTF_USESHOWWINDOW + SW_HIDE) pour plus de fiabilité —
+    voir la docstring du module (fenêtre nvidia-smi qui s'ouvrait/se
+    fermait en boucle tant que le monitoring en direct tournait)."""
+    creationflags = 0
+    startupinfo = None
+    if sys.platform == "win32":
+        creationflags = subprocess.CREATE_NO_WINDOW
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+
+    result = subprocess.run(
+        args, capture_output=True, text=True, timeout=3,
+        creationflags=creationflags, startupinfo=startupinfo,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
 def _read_gpu_load() -> tuple[Optional[float], bool]:
     try:
-        import GPUtil
-        gpus = GPUtil.getGPUs()
-        if not gpus:
+        nvidia_smi = _find_nvidia_smi()
+        if nvidia_smi is None:
             return None, False
-        return round(gpus[0].load * 100, 1), True
+
+        output = _run_hidden(
+            [nvidia_smi, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"]
+        )
+        if not output:
+            return None, False
+
+        first_line = output.strip().splitlines()[0].strip()
+        if not first_line:
+            return None, False
+        return round(float(first_line), 1), True
     except Exception as exc:
-        logger.warning("GPUtil indisponible (%s)", exc)
+        logger.warning("nvidia-smi indisponible (%s)", exc)
         return None, False

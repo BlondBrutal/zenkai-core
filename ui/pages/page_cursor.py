@@ -123,8 +123,15 @@ class CursorPage(BasePage):
         hint.setStyleSheet(f"font-size: 11.5px; color: {STATUS_NEUTRAL};")
         body.addWidget(hint)
 
-        body.addStretch(1)
+        # Le stretch final doit vivre au niveau de content_layout() (comme
+        # sur les autres pages, ex. page_fastflags.py), pas à l'intérieur de
+        # ce layout imbriqué : sans stretch propre au niveau de
+        # content_layout(), tout l'espace vertical excédentaire de la page
+        # remontait dans la rangée titre elle-même (elle s'étirait sur toute
+        # la hauteur disponible), ce qui désalignait le titre par rapport au
+        # badge "?" et poussait tout le contenu anormalement bas.
         self.content_layout().addLayout(body)
+        self.content_layout().addStretch(1)
 
         self._refresh()
 

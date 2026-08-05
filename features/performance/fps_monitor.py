@@ -40,6 +40,8 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from core.elevation import is_admin
+
 logger = logging.getLogger("zenkaiontop.performance")
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -86,7 +88,24 @@ def _run_elevated_hidden(exe_path: str, args: list[str], wait_seconds: Optional[
     PresentMon's --restart_as_admin. `wait_seconds` bloque jusqu'à la fin du
     process élevé (utilisé pour --terminate_existing_session, où on veut
     attendre que l'arrêt soit effectif) ; None ne bloque pas (démarrage
-    normal, suivi ensuite via le fichier CSV taillé)."""
+    normal, suivi ensuite via le fichier CSV taillé). Si le process courant
+    est déjà élevé (voir core/elevation.py — l'app entière se relance en
+    admin au démarrage), un simple subprocess.Popen suffit : pas besoin de
+    redemander un prompt UAC individuel pour cette action."""
+    if is_admin():
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+        proc = subprocess.Popen(
+            [exe_path, *args], creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startupinfo,
+        )
+        if wait_seconds is not None:
+            try:
+                proc.wait(timeout=wait_seconds)
+            except subprocess.TimeoutExpired:
+                logger.warning("Timeout en attendant PresentMon (déjà élevé)")
+        return
+
     info = _ShellExecuteInfoW()
     info.cbSize = ctypes.sizeof(_ShellExecuteInfoW)
     info.fMask = _SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC

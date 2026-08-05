@@ -31,6 +31,7 @@ from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
 from ui.pages.page_risk import RiskControlsPanel
 from ui.ring_gauge import RingGauge
+from ui.scrollbar_style import style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.toggle_switch import ToggleSwitch
 
@@ -54,11 +55,27 @@ _RING_CRITICAL_PERCENT = 80.0
 # l'expérience chargée dedans — jamais un sélecteur d'application générique.
 ROBLOX_PROCESS_NAME = "RobloxPlayerBeta.exe"
 
-# Redéclare juste "margin" par-dessus la règle globale QScrollBar:vertical de
-# theme.qss (margin: 0px partout ailleurs) : scopé aux QScrollArea des
-# onglets Overlay/Risque uniquement (voir _build_scrollable_tab_container),
-# pas un changement du style de scrollbar app-wide.
-_SCROLLBAR_INSET_QSS = "QScrollBar:vertical { margin: 4px 6px 4px 0px; }"
+# Barre de scroll en forme de pilule, scopée aux 3 onglets
+# Diagnostic/Overlay/Risque (voir _build_scrollable_tab_container) — un peu
+# plus épaisse que le style app-wide habituel (10px, voir
+# ui/scrollbar_style.py). Posée directement sur l'instance via
+# style_scrollbar_directly (même technique déjà éprouvée pour la
+# bibliothèque de macros) : ces onglets vivent dans un QStackedWidget
+# (section_stack), contexte où le QProxyStyle app-wide seul n'est pas fiable.
+_TAB_SCROLLBAR_THICKNESS = 11  # -10% (12 -> 11)
+# Même valeur que la marge gauche du contenu de chacun des 3 onglets
+# (results_layout / _OverlayControlsPanel / RiskControlsPanel, tous à 12px) :
+# l'écart entre la barre et le bord droit de la carte doit être identique à
+# l'écart entre le contenu et son bord gauche.
+_TAB_SCROLLBAR_GAP = 12
+# Petit espace en haut/bas de la barre (au lieu de toucher les bords) : le
+# "margin" QSS sur la QScrollBar elle-même n'a aucun effet vertical ici
+# (vérifié : bar.y()==0 et bar.height()==viewport.height() peu importe la
+# valeur déclarée) — on rogne donc la QScrollArea elle-même via un padding
+# haut/bas (même technique que _TAB_SCROLLBAR_GAP pour le bord droit), qui
+# réduit la hauteur disponible pour la barre en même temps que celle du
+# contenu.
+_TAB_SCROLLBAR_VERTICAL_INSET = 4
 
 
 def _severity_color(value: float) -> str:
@@ -296,6 +313,17 @@ class _NavTabButton(QFrame):
             self._label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {_TAB_DISABLED_COLOR};")
 
 
+class _NoWheelSlider(QSlider):
+    """QSlider dont la molette de la souris ne change jamais la valeur —
+    seul le glisser-déposer de la poignée le peut. L'événement est ignoré
+    (pas juste "non traité") pour qu'il remonte au parent : la molette au-
+    dessus d'un curseur fait défiler la page, comme si le curseur n'était
+    pas là."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 _OVERLAY_ELEMENT_LABEL_KEYS = {
     "cpu": "page.performance.overlay_element_cpu",
     "ram": "page.performance.overlay_element_ram",
@@ -342,7 +370,7 @@ class _OverlayControlsPanel(QFrame):
         self.setStyleSheet("background: transparent;")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
         enable_row = QHBoxLayout()
@@ -441,9 +469,14 @@ class _OverlayControlsPanel(QFrame):
         title.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
         parent_layout.addWidget(title)
 
-        slider = QSlider(Qt.Orientation.Horizontal)
+        slider = _NoWheelSlider(Qt.Orientation.Horizontal)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
+        # La poignée stylée (theme.qss) déborde de 16px de haut alors que le
+        # sizeHint par défaut du QSlider (15px) ignore ce déborderment défini
+        # en QSS : sans hauteur fixe plus généreuse, la poignée ronde est
+        # rognée en haut et en bas de sa piste.
+        slider.setFixedHeight(22)
         slider.valueChanged.connect(self._emit_changed)
         parent_layout.addWidget(slider)
         return slider
@@ -732,7 +765,6 @@ class PerformancePage(BasePage):
         # (header_layout() pousse tout ce qui est ajouté après son stretch interne).
         self.header_layout().addWidget(self._build_monitoring_toggle_control())
 
-        self.content_layout().addWidget(self._build_monitoring_status_label())
         self.content_layout().addWidget(self._build_live_row())
         # Même écart que celui, de référence, entre les tuiles CPU/RAM/GPU/
         # Disque ci-dessus (QHBoxLayout.setSpacing(12) dans _build_live_row) :
@@ -740,14 +772,11 @@ class PerformancePage(BasePage):
         # (6 + 16) que ce addSpacing(16) donnait avant.
         self.content_layout().addSpacing(6)
 
-        # Résultats en premier (index 0, affiché par défaut) : plus d'écran
-        # "Analysez votre PC..." intermédiaire avant le premier lancement —
-        # la mise en page des résultats est visible dès l'affichage de
-        # l'onglet, juste vide (seul le bouton d'action) tant qu'aucun
-        # diagnostic n'a encore tourné (voir _build_results_container).
-        self.scan_stack = QStackedWidget()
-        self._results_index = self.scan_stack.addWidget(self._build_results_container())
-        self._scanning_index = self.scan_stack.addWidget(self._build_scanning_state())
+        # Plus d'écran "Analysez votre PC..." intermédiaire avant le premier
+        # lancement : la mise en page des résultats est visible dès
+        # l'affichage de l'onglet, juste vide (seul le bouton d'action) tant
+        # qu'aucun diagnostic n'a encore tourné (voir _build_results_container).
+        self._build_results_container()
 
         self._overlay_panel = _OverlayControlsPanel(
             self._overlay_enabled(),
@@ -769,20 +798,29 @@ class PerformancePage(BasePage):
         self.section_stack = QStackedWidget()
         # Les 3 onglets partagent EXACTEMENT le même conteneur extérieur
         # (bordure + fond "card" + scrollbar, voir _build_scrollable_tab_container) :
-        # leur contenu respectif (scan_stack/panneau overlay/panneau risque)
-        # est donc lui-même transparent, sans sa propre bordure "card"
-        # imbriquée (voir _build_empty_state/_build_scanning_state/
-        # _build_results_container/RiskControlsPanel), sous peine de double
-        # contour empilé au même endroit.
-        self._section_diagnostic_index = self.section_stack.addWidget(
-            self._build_scrollable_tab_container(self.scan_stack)
-        )
+        # leur contenu respectif (résultats du diagnostic/panneau overlay/
+        # panneau risque) est donc lui-même transparent, sans sa propre
+        # bordure "card" imbriquée (voir _build_results_container/
+        # RiskControlsPanel), sous peine de double contour empilé au même
+        # endroit.
+        self._diagnostic_scroll = self._build_scrollable_tab_container(self.results_widget)
+        self._section_diagnostic_index = self.section_stack.addWidget(self._diagnostic_scroll)
         self._section_overlay_index = self.section_stack.addWidget(
             self._build_scrollable_tab_container(self._overlay_panel)
         )
         self._section_risk_index = self.section_stack.addWidget(
             self._build_scrollable_tab_container(self._risk_panel)
         )
+
+        # Superposé au-dessus de la zone de résultats (pas un widget de plus
+        # dans le flux défilant) : reste ainsi toujours visible pendant tout
+        # le scan, peu importe la position de défilement ou la hauteur des
+        # résultats du scan précédent — un ancien QStackedWidget interne
+        # pouvait se retrouver hors du cadre visible si le défilement
+        # n'était pas remis à zéro (constaté : le curseur restait scrollé en
+        # bas de longs résultats précédents, cachant l'animation du scan
+        # suivant).
+        self._build_scan_overlay()
 
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(12)
@@ -817,6 +855,7 @@ class PerformancePage(BasePage):
         super().hideEvent(event)
         self._stop_live_thread_if_unneeded()
         self.scan_loader.stop()
+        self._scan_overlay.hide()
 
     def _overlay_enabled(self) -> bool:
         return bool(config.get("performance_overlay_enabled", False))
@@ -844,7 +883,6 @@ class PerformancePage(BasePage):
         else:
             self._stop_live_thread_if_unneeded()
             self._reset_live_tiles()
-        self.monitoring_status_label.setVisible(not checked)
 
     def _reset_live_tiles(self) -> None:
         for ring in (self.cpu_ring, self.ram_ring, self.gpu_ring):
@@ -874,13 +912,6 @@ class PerformancePage(BasePage):
         row.addWidget(self.monitoring_toggle)
 
         return wrapper
-
-    def _build_monitoring_status_label(self) -> QLabel:
-        initial_enabled = bool(config.get("performance_live_monitoring_enabled", True))
-        self.monitoring_status_label = QLabel(t("page.performance.live_monitoring_off"))
-        self.monitoring_status_label.setStyleSheet(f"font-size: 11px; color: {STATUS_NEUTRAL};")
-        self.monitoring_status_label.setVisible(not initial_enabled)
-        return self.monitoring_status_label
 
     # ------------------------------------------------------------------
     # Colonne de sélection de section (Diagnostic / Overlay / réservé)
@@ -945,8 +976,8 @@ class PerformancePage(BasePage):
     def _build_scrollable_tab_container(self, content: QWidget) -> QScrollArea:
         """Conteneur commun aux 3 onglets de la zone principale : bordure +
         fond "card" + barre de scroll verticale, identiques quel que soit
-        l'onglet actif. `content` (scan_stack / panneau overlay / panneau
-        risque) n'a lui-même aucune carte interne (juste des widgets qui
+        l'onglet actif. `content` (résultats du diagnostic / panneau overlay
+        / panneau risque) n'a lui-même aucune carte interne (juste des widgets qui
         flottent, background transparent) — le fond/contour "card" est donc
         porté par la QScrollArea elle-même (reste fixe pendant le
         défilement), jamais dupliqué à l'intérieur.
@@ -956,11 +987,30 @@ class PerformancePage(BasePage):
         le bord de la zone — un léger espace la détache du contour."""
         scroll = QScrollArea()
         scroll.setProperty("class", "card")
-        scroll.setStyleSheet(_SCROLLBAR_INSET_QSS)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # QSS "margin" sur une QScrollBar n'a aucun effet ici (ni horizontal
+        # ni vertical, vérifié) — la place réservée pour la barre ("width")
+        # comme sa position (haut/bas) ne bougent pas d'un pixel quelle que
+        # soit la valeur déclarée. Pour la détacher des bords de la carte
+        # (droit, haut, bas), on rogne donc directement la carte elle-même
+        # via un padding, plutôt que la scrollbar : viewport ET scrollbar se
+        # déplacent/réduisent ensemble.
+        scroll.setStyleSheet(
+            "QScrollArea {"
+            f" padding-right: {_TAB_SCROLLBAR_GAP}px;"
+            f" padding-top: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
+            f" padding-bottom: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
+            " }"
+        )
         scroll.viewport().setStyleSheet("background: transparent;")
         scroll.setWidget(content)
+        # Voir _TAB_SCROLLBAR_THICKNESS : épaissit cette barre précise.
+        style_scrollbar_directly(
+            scroll.verticalScrollBar(),
+            thickness=_TAB_SCROLLBAR_THICKNESS,
+            min_handle_length=28,
+        )
         return scroll
 
     def _ensure_overlay(self) -> None:
@@ -1163,38 +1213,47 @@ class PerformancePage(BasePage):
         self.disk_write_label.setText(f"{t('page.performance.disk_write')} {sample.disk_write_mbps:.1f} Mo/s")
 
     # ------------------------------------------------------------------
-    # État "scan en cours"
+    # Superposition "scan en cours" : couvre la zone de résultats (pas un
+    # widget de plus dans le flux défilant, voir le commentaire dans
+    # __init__) pour rester toujours visible pendant tout le scan.
     # ------------------------------------------------------------------
-    def _build_scanning_state(self) -> QFrame:
-        # Pas de classe "card" ici : le conteneur extérieur commun aux 3
-        # onglets (voir _build_scrollable_tab_container) porte déjà la
-        # bordure/le fond — un second contour imbriqué au même endroit
-        # ferait une double bordure.
-        frame = QFrame()
-        frame.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-
-        desc = QLabel(t("page.performance.empty_desc"))
-        desc.setWordWrap(True)
-        desc.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        desc.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
-        layout.addWidget(desc)
-
+    def _build_scan_overlay(self) -> None:
+        # Parenté directe à la QScrollArea (pas au viewport) : sa géométrie
+        # ne dépend donc jamais du défilement du contenu, contrairement à un
+        # widget placé dans results_layout. Fond opaque de la même couleur
+        # que "class=card" (#1F1F25) : cache complètement les résultats de
+        # l'ancien scan pendant que le nouveau tourne.
+        self._scan_overlay = QFrame(self._diagnostic_scroll)
+        self._scan_overlay.setStyleSheet("background-color: #1F1F25;")
+        layout = QVBoxLayout(self._scan_overlay)
         layout.addStretch(1)
-
-        # Juste l'animation (cercle + vagues), aucun texte pendant le scan.
         self.scan_loader = PulsingLoader()
         layout.addWidget(self.scan_loader, 0, Qt.AlignmentFlag.AlignHCenter)
-
         layout.addStretch(1)
-        return frame
+        self._scan_overlay.hide()
+
+        # Garde la superposition alignée sur la zone visible si la fenêtre
+        # est redimensionnée pendant qu'un scan tourne.
+        self._diagnostic_scroll.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._diagnostic_scroll and event.type() == event.Type.Resize:
+            self._scan_overlay.setGeometry(self._diagnostic_scroll.rect())
+        return super().eventFilter(watched, event)
+
+    def _show_scan_overlay(self, visible: bool) -> None:
+        if visible:
+            self._scan_overlay.setGeometry(self._diagnostic_scroll.rect())
+            self._scan_overlay.raise_()
+            self._scan_overlay.show()
+            self.scan_loader.start()
+        else:
+            self.scan_loader.stop()
+            self._scan_overlay.hide()
 
     def _start_scan(self) -> None:
         live_snapshot = self._live_thread.average_sample() if self._live_thread else None
-        self.scan_stack.setCurrentIndex(self._scanning_index)
-        self.scan_loader.start()
+        self._show_scan_overlay(True)
 
         self._scan_worker = PerformanceScanWorker(live_snapshot, self)
         self._scan_worker.finished_scan.connect(self._on_scan_finished)
@@ -1220,9 +1279,9 @@ class PerformancePage(BasePage):
         self.results_widget.setStyleSheet("background: transparent;")
         self.results_layout = QVBoxLayout(self.results_widget)
         # Marge sur les 4 côtés (même valeur que les panneaux Overlay/Risque,
-        # 20px) : sans ça, les cartes de résultats touchaient directement les
+        # 12px) : sans ça, les cartes de résultats touchaient directement les
         # bords de la zone de défilement.
-        self.results_layout.setContentsMargins(20, 20, 20, 20)
+        self.results_layout.setContentsMargins(12, 12, 12, 12)
         self.results_layout.setSpacing(14)
 
         # Bouton persistant (jamais recréé/détruit, voir _render_results) :
@@ -1236,10 +1295,9 @@ class PerformancePage(BasePage):
         return self.results_widget
 
     def _on_scan_finished(self, result: ScanResult) -> None:
-        self.scan_loader.stop()
         self._last_result = result
         self._render_results(result)
-        self.scan_stack.setCurrentIndex(self._results_index)
+        self._show_scan_overlay(False)
 
     def _render_results(self, result: ScanResult) -> None:
         # Vide tout SAUF le bouton d'action (jamais détruit, juste retiré du
