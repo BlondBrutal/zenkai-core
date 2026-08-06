@@ -45,3 +45,19 @@ def get_cursors_dir() -> str:
     cursors_dir = os.path.join(get_app_data_dir(), "cursors")
     os.makedirs(cursors_dir, exist_ok=True)
     return cursors_dir
+
+
+def get_fastflags_presets_dir() -> str:
+    """Dossier des presets Fast Flags personnalisés (enregistrés depuis
+    l'éditeur, ou importés depuis un fichier externe) — voir
+    features/fastflags/manager.py."""
+    presets_dir = os.path.join(get_app_data_dir(), "fastflags_presets")
+    os.makedirs(presets_dir, exist_ok=True)
+    return presets_dir
+
+
+def get_fastflags_known_flags_path() -> str:
+    """Fichier des noms de flags "appris" au fil des imports de
+    l'utilisateur (voir features/fastflags/manager.py:get_known_flags) —
+    séparé du dossier des presets pour ne pas apparaître comme un preset."""
+    return os.path.join(get_app_data_dir(), "fastflags_known_learned.json")

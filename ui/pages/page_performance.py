@@ -750,6 +750,12 @@ class PerformancePage(BasePage):
         super().__init__(t("page.performance.title"), "", parent)
         self.add_info_badge(t("page.performance.subtitle"))
 
+        # Marge droite réduite (32 -> 16), comme la page Macro (référence) :
+        # cohérence de largeur de contenu entre toutes les pages (voir aussi
+        # page_cursor.py/page_license.py/page_fastflags.py).
+        margins = self.content_layout().contentsMargins()
+        self.content_layout().setContentsMargins(margins.left(), margins.top(), 16, margins.bottom())
+
         self._live_thread: LiveMonitorThread | None = None
         self._scan_worker: PerformanceScanWorker | None = None
         self._last_result: ScanResult | None = None

@@ -46,6 +46,12 @@ class LicensePage(BasePage):
         super().__init__(t("page.license.title"), "", parent)
         self.add_info_badge(t("page.license.placeholder"))
 
+        # Marge droite réduite (32 -> 16), comme la page Macro (référence) :
+        # cohérence de largeur de contenu entre toutes les pages (voir aussi
+        # page_performance.py/page_cursor.py/page_fastflags.py).
+        margins = self.content_layout().contentsMargins()
+        self.content_layout().setContentsMargins(margins.left(), margins.top(), 16, margins.bottom())
+
         self._worker = None  # référence gardée pour éviter le garbage collection pendant le run()
 
         # --- Formulaire de saisie (première activation / changement de clé) ---

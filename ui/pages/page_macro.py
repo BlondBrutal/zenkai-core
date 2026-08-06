@@ -16,8 +16,8 @@ import json
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QListWidgetItem, QMenu, QMessageBox, QPushButton, QScrollArea,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from core.config import config
@@ -59,6 +59,46 @@ _TAB_DEFS = [
     ("pixel", "page.macro.tab2_title", "page.macro.tab2_subtitle"),
     ("combo", "page.macro.tab3_title", "page.macro.tab3_subtitle"),
 ]
+
+# Même menu contextuel stylé que celui du tableau Macro Simple (voir
+# macro_simple_tab.py::_build_styled_menu) : QMenu est une fenêtre top-level
+# détachée (comme le popup natif d'un QComboBox), donc fond+bordure posés
+# directement sur l'instance avec WA_TranslucentBackground pour que les
+# coins soient vraiment découpés par le compositeur plutôt que de rester
+# carrés sous un simple border-radius QSS.
+_CONTEXT_MENU_QSS = """
+QMenu {
+    background-color: #202027;
+    color: #E7E9EE;
+    border: 1px solid #17B897;
+    border-radius: 8px;
+    padding: 4px;
+    font-size: 9px;
+}
+QMenu::item {
+    padding: 4px 12px;
+    border-radius: 6px;
+}
+QMenu::item:selected {
+    background-color: transparent;
+    color: #17B897;
+}
+"""
+
+
+def _build_styled_menu(parent: QWidget) -> QMenu:
+    menu = QMenu(parent)
+    # FramelessWindowHint (retire le cadre natif rectangulaire) +
+    # WA_TranslucentBackground (laisse le compositeur alpha-blender les
+    # coins découpés par le border-radius) : les deux sont nécessaires
+    # ensemble, l'un sans l'autre laisse un résidu carré derrière l'arrondi.
+    menu.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    # Ombre portée native (DWM) elle aussi rectangulaire, désactivée pour la
+    # même raison.
+    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    menu.setStyleSheet(_CONTEXT_MENU_QSS)
+    return menu
 
 
 class _SegmentButton(QFrame):
@@ -341,10 +381,10 @@ class MacroPage(BasePage):
         # onglet paraît cassé/vide plutôt que "pas encore construit".
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 32, 0, 0)
+        layout.setContentsMargins(24, 24, 24, 24)
 
         label = QLabel(t("page.macro.tab3_placeholder"))
-        label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         label.setWordWrap(True)
         label.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {STATUS_NEUTRAL};")
         layout.addWidget(label)
@@ -388,30 +428,29 @@ class MacroPage(BasePage):
 
         layout.addSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
-        # Liste et message "vide" partagent une même zone (QStackedWidget) de
-        # hauteur constante (stretch=1, comme avant pour la seule liste) :
-        # seul le CONTENU de cette zone change selon qu'il y a des macros ou
-        # non, jamais l'espacement des éléments autour (titre, sous-titre,
-        # recherche, Importer/Exporter, bouton Supprimer).
-        self.library_empty_label = QLabel(t("page.macro.library_empty"))
-        self.library_empty_label.setWordWrap(True)
-        self.library_empty_label.setStyleSheet("color: #6B7280; font-size: 12px;")
-
+        # Toujours affichée telle quelle, même vide (pas de message de
+        # remplacement) : la zone grise de la liste reste visible en
+        # l'absence de macros sauvegardées.
         self.library_list = QListWidget()
-        self.library_list.itemClicked.connect(self._on_library_item_clicked)
-
-        self.library_stack = QStackedWidget()
-        self.library_stack.addWidget(self.library_empty_label)
-        self.library_stack.addWidget(self.library_list)
-        layout.addWidget(self.library_stack, 1)
+        # Cliquer un élément ne fait plus que le sélectionner (surbrillance) :
+        # il faut cliquer explicitement "Ouvrir" pour charger son contenu
+        # (même principe que la Bibliothèque Fast Flags, voir
+        # page_fastflags.py::_build_library_column).
+        self.library_list.itemClicked.connect(self._on_library_item_selected)
+        # Plus de bouton "Supprimer" fixe : la suppression se fait désormais
+        # via un clic droit sur l'élément (menu contextuel, voir
+        # _on_library_context_menu), comme dans le tableau Macro Simple.
+        self.library_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.library_list.customContextMenuRequested.connect(self._on_library_context_menu)
+        layout.addWidget(self.library_list, 1)
 
         # Toujours visible : désactivé (grisé) plutôt que masqué quand rien
-        # n'est sélectionnable, pour ne jamais décaler le reste de la colonne.
-        self.delete_btn = QPushButton(t("page.macro.library_delete_btn"))
-        self.delete_btn.setProperty("class", "secondaryButton")
-        self.delete_btn.setEnabled(False)
-        self.delete_btn.clicked.connect(self._on_delete_clicked)
-        layout.addWidget(self.delete_btn)
+        # n'est sélectionné, pour ne jamais décaler le reste de la colonne.
+        self.open_btn = QPushButton(t("page.macro.library_open_btn"))
+        self.open_btn.setProperty("class", "secondaryButton")
+        self.open_btn.setEnabled(False)
+        self.open_btn.clicked.connect(self._on_open_clicked)
+        layout.addWidget(self.open_btn)
 
         return column
 
@@ -438,10 +477,12 @@ class MacroPage(BasePage):
 
         self.library_list.clear()
         self._library_entries: dict[str, str] = {}  # nom -> chemin fichier
+        # Réinitialisé à chaque rafraîchissement : "Ouvrir" ne se réactive
+        # qu'au clic explicite sur un élément (voir _on_library_item_selected),
+        # jamais automatiquement.
+        self.open_btn.setEnabled(False)
 
         if not supported:
-            self.library_stack.setCurrentWidget(self.library_empty_label)
-            self.delete_btn.setEnabled(False)
             self.export_btn.setEnabled(False)
             self.export_btn.setToolTip(t("page.macro.library_disabled_tooltip"))
             return
@@ -454,8 +495,6 @@ class MacroPage(BasePage):
         ]
 
         has_items = bool(macros)
-        self.library_stack.setCurrentWidget(self.library_list if has_items else self.library_empty_label)
-        self.delete_btn.setEnabled(has_items)
         self.export_btn.setEnabled(has_items)
         self.export_btn.setToolTip("")
 
@@ -465,7 +504,33 @@ class MacroPage(BasePage):
             self.library_list.addItem(item)
             self._library_entries[macro.name] = path
 
-    def _on_library_item_clicked(self, item: QListWidgetItem) -> None:
+    def _on_library_item_selected(self, item: QListWidgetItem) -> None:
+        # Sélectionne seulement (surbrillance) : ne charge rien dans l'onglet
+        # tant que "Ouvrir" n'est pas cliqué explicitement (voir
+        # _on_open_clicked).
+        self.open_btn.setEnabled(True)
+
+    def _on_library_context_menu(self, pos) -> None:
+        """Clic droit sur un élément de la liste : menu avec "Supprimer"
+        (remplace l'ancien bouton fixe "Supprimer la sélection"). Le clic
+        droit sélectionne aussi l'élément visé (comme un clic gauche), pour
+        que "Ouvrir" reste cohérent avec ce qui vient d'être choisi."""
+        item = self.library_list.itemAt(pos)
+        if item is None:
+            return
+        self.library_list.setCurrentItem(item)
+        self._on_library_item_selected(item)
+
+        menu = _build_styled_menu(self.library_list)
+        delete_action = menu.addAction(t("page.macro.library_delete_btn"))
+        chosen = menu.exec(self.library_list.viewport().mapToGlobal(pos))
+        if chosen is delete_action:
+            self._on_delete_clicked()
+
+    def _on_open_clicked(self) -> None:
+        item = self.library_list.currentItem()
+        if item is None:
+            return
         path = item.data(Qt.ItemDataRole.UserRole)
         list_fn = _LIST_FUNCS.get(self._current_macro_type)
         matches = [macro for p, macro in (list_fn() if list_fn else []) if p == path]

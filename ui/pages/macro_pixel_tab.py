@@ -191,7 +191,7 @@ class PixelMacroSlot(QWidget):
         section = QVBoxLayout()
         section.setSpacing(6)
 
-        self.pick_btn = AnimatedButton(t("page.macro.pixel.pick_btn"), variant="neutral", text_color=STATUS_NEUTRAL)
+        self.pick_btn = AnimatedButton(t("page.macro.pixel.pick_btn"), variant="neutral")
         self.pick_btn.clicked.connect(self._start_picking)
         pick_row = QHBoxLayout()
         pick_row.addWidget(self.pick_btn)
@@ -339,12 +339,30 @@ class PixelMacroSlot(QWidget):
     def _start_picking(self) -> None:
         self._overlay = PixelPickerOverlay()
         self._overlay.picked.connect(self._on_pixel_picked)
+        self._overlay.cancelled.connect(self._on_pick_cancelled)
+        # Masque la fenêtre principale le temps de la sélection : sans ça,
+        # elle peut recouvrir/gêner le clic sur le pixel visé à l'écran
+        # (notamment si celui-ci se trouve derrière la fenêtre de l'app).
+        # self.window() retrouve la fenêtre de haut niveau (MainWindow) peu
+        # importe la profondeur d'imbrication de ce widget.
+        window = self.window()
+        if window is not None:
+            window.hide()
         self._overlay.show()
+
+    def _on_pick_cancelled(self) -> None:
+        self._restore_main_window_after_picking()
+
+    def _restore_main_window_after_picking(self) -> None:
+        window = self.window()
+        if window is not None:
+            window.show()
 
     def _on_pixel_picked(self, x: int, y: int, color: tuple) -> None:
         self.x_input.setText(str(x))
         self.y_input.setText(str(y))
         self.hex_input.setText(f"{color[0]:02X}{color[1]:02X}{color[2]:02X}")
+        self._restore_main_window_after_picking()
 
     # ------------------------------------------------------------------
     # Construction / validation de la config

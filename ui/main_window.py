@@ -3,9 +3,11 @@ Fenêtre principale : assemble la sidebar et la zone de contenu (QStackedWidget)
 """
 import os
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
 
+from core.config import config
 from core.i18n import t
 from ui.sidebar import Sidebar
 from ui.tray import build_tray_icon, retranslate_tray_icon
@@ -38,6 +40,13 @@ class MainWindow(QMainWindow):
         # grise tout seul dès qu'une fenêtre n'a plus de marge de
         # redimensionnement) et bloque aussi le glissement des bords.
         self.setFixedSize(987, 640)
+
+        # Restaure le réglage "Toujours au premier plan" (page Paramètres) :
+        # posé ici, avant le tout premier show() (voir main.py), pas besoin
+        # de re-show() pour l'appliquer contrairement à _set_always_on_top
+        # (appelé lui APRÈS que la fenêtre soit déjà affichée).
+        if bool(config.get("always_on_top", False)):
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
         icon_path = os.path.join(ASSETS_DIR, "logo", "logo.ico")
         if os.path.exists(icon_path):
@@ -102,12 +111,26 @@ class MainWindow(QMainWindow):
         performance_page.boost_requested.connect(fastflags_page.show_recommendation)
 
         self.pages["settings"].language_changed.connect(lambda _code: self.reload_language())
+        self.pages["settings"].always_on_top_changed.connect(self._set_always_on_top)
 
     def show_page(self, key: str) -> None:
         index = self._page_index.get(key)
         if index is not None:
             self.stack.setCurrentIndex(index)
             self.sidebar.select(key)
+
+    def _set_always_on_top(self, enabled: bool) -> None:
+        # setWindowFlags masque la fenêtre (comportement Qt) : contrairement
+        # au réglage initial dans __init__ (posé avant le tout premier
+        # show()), un re-show() est ici indispensable pour que le nouveau
+        # flag s'applique réellement.
+        flags = self.windowFlags()
+        if enabled:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.show()
 
     def reload_language(self) -> None:
         """Applique le changement de langue à toute l'UI sans fermer/relancer

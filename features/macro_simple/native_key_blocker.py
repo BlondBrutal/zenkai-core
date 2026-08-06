@@ -43,6 +43,20 @@ WM_SYSKEYUP = 0x0105
 _KEY_DOWN_MESSAGES = (WM_KEYDOWN, WM_SYSKEYDOWN)
 _KEY_UP_MESSAGES = (WM_KEYUP, WM_SYSKEYUP)
 
+# Marque un évènement clavier/souris comme SYNTHÉTISÉ (injecté via SendInput
+# — c'est exactement comme ça que pydirectinput/pynput envoient les touches
+# rejouées par MacroPlayerThread, voir player.py) plutôt qu'une vraie touche
+# physique. Sans cette distinction, ce hook bloquait AUSSI les propres
+# touches simulées de la macro dès qu'elles correspondaient à la touche de
+# déclenchement (ex : la touche de déclenchement réutilisée comme première
+# action de la séquence ne partait jamais) — un évènement injecté doit
+# toujours passer inchangé (jamais traité comme un appui du déclencheur,
+# jamais supprimé), seul un VRAI appui physique doit être intercepté ici.
+LLKHF_LOWER_IL_INJECTED = 0x00000002
+LLKHF_INJECTED = 0x00000010
+LLMHF_LOWER_IL_INJECTED = 0x00000002
+LLMHF_INJECTED = 0x00000001
+
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONDOWN = 0x0204
@@ -247,7 +261,8 @@ class NativeKeyBlocker:
     def _keyboard_proc(self, n_code, w_param, l_param):
         if n_code >= 0:
             info = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-            if info.vkCode == self._vk:
+            is_injected = bool(info.flags & (LLKHF_INJECTED | LLKHF_LOWER_IL_INJECTED))
+            if not is_injected and info.vkCode == self._vk:
                 if w_param in _KEY_DOWN_MESSAGES:
                     self._on_press()
                 elif w_param in _KEY_UP_MESSAGES:
@@ -257,17 +272,18 @@ class NativeKeyBlocker:
 
     def _mouse_proc(self, n_code, w_param, l_param):
         if n_code >= 0:
+            info = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+            is_injected = bool(info.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED))
             name = pressed = None
             if w_param in _MOUSE_DOWN_TO_NAME:
                 name, pressed = _MOUSE_DOWN_TO_NAME[w_param], True
             elif w_param in _MOUSE_UP_TO_NAME:
                 name, pressed = _MOUSE_UP_TO_NAME[w_param], False
             elif w_param in (WM_XBUTTONDOWN, WM_XBUTTONUP):
-                info = ctypes.cast(l_param, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
                 x_button = (info.mouseData >> 16) & 0xFFFF
                 name = "mouse_x1" if x_button == XBUTTON1 else "mouse_x2"
                 pressed = w_param == WM_XBUTTONDOWN
-            if name == self._key_name:
+            if not is_injected and name == self._key_name:
                 if pressed:
                     self._on_press()
                 else:

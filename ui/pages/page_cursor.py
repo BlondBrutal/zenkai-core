@@ -103,6 +103,13 @@ class CursorPage(BasePage):
         self.add_info_badge(t("page.cursor.subtitle"))
         self._manager = get_cursor_manager()
 
+        # Marge droite réduite (32 -> 16), comme la page Macro (référence) :
+        # sans ça, le contenu de cette page s'arrête plus tôt que celui de
+        # Macro et laisse un vide inutile à droite (incohérence visuelle
+        # entre pages, voir aussi page_performance.py/page_license.py).
+        margins = self.content_layout().contentsMargins()
+        self.content_layout().setContentsMargins(margins.left(), margins.top(), 16, margins.bottom())
+
         body = QVBoxLayout()
         body.setSpacing(16)
 

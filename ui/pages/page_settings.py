@@ -16,12 +16,14 @@ from core.i18n import get_language, set_language, t
 from ui.pages.base_page import BasePage
 from ui.segmented_toggle import SegmentedToggle
 from ui.status_colors import STATUS_NEUTRAL
+from ui.toggle_switch import ToggleSwitch
 
 _LANGUAGES = [("fr", "FR"), ("en", "EN")]
 
 
 class SettingsPage(BasePage):
     language_changed = pyqtSignal(str)
+    always_on_top_changed = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(t("page.settings.title"), "", parent)
@@ -52,6 +54,18 @@ class SettingsPage(BasePage):
         row.addStretch(1)
         layout.addLayout(row)
 
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+        top_label = QLabel(t("page.settings.always_on_top"))
+        top_label.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
+        top_row.addWidget(top_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.always_on_top_toggle = ToggleSwitch(checked=bool(config.get("always_on_top", False)))
+        self.always_on_top_toggle.toggled.connect(self._on_always_on_top_toggled)
+        top_row.addWidget(self.always_on_top_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        top_row.addStretch(1)
+        layout.addLayout(top_row)
+
         return section
 
     def _on_language_changed(self, code: str) -> None:
@@ -60,3 +74,7 @@ class SettingsPage(BasePage):
         set_language(code)
         config.set("language", code)
         self.language_changed.emit(code)
+
+    def _on_always_on_top_toggled(self, checked: bool) -> None:
+        config.set("always_on_top", checked)
+        self.always_on_top_changed.emit(checked)

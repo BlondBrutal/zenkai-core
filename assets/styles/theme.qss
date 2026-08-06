@@ -454,6 +454,15 @@ QFrame.card {
     border-radius: 14px;
 }
 
+/* Carte "active" (ex: preset Fast Flags actuellement appliqué) — même
+   principe que QFrame.navTabButton[active="true"] ci-dessous, réutilisé ici
+   pour rester cohérent avec le seul autre endroit de l'app qui met en
+   évidence un état "actif" sur une carte. */
+QFrame.card[active="true"] {
+    border: 1px solid #17B897;
+    background-color: rgba(23, 184, 151, 14);
+}
+
 /* Bouton d'onglet vertical de la colonne de droite (Diagnostic / Overlay /
    réservé, page Performance) — voir _NavTabButton dans page_performance.py. */
 QFrame.navTabButton {

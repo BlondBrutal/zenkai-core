@@ -115,7 +115,13 @@
       "Bash(where nvidia-smi *)",
       "Read(//c/Program Files/NVIDIA Corporation/NVSMI/**)",
       "Bash(rm -f out_30s.log out_other.log)",
-      "Bash(pip show *)"
+      "Bash(pip show *)",
+      "Bash(awk '/^class /{cls=$0} /_start_picking/{print NR\": \"cls}' ui/pages/macro_pixel_tab.py)",
+      "Bash(rm -f out_blocker.log out_liverefresh.log out_delay.log out_ontop.log out_pixelpick.log)",
+      "Bash(rm -f out_liverec.log)",
+      "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Hard ff.json\" \"assets/fastflags_presets/hard.json\")",
+      "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Balanced ff.json\" \"assets/fastflags_presets/balanced.json\")",
+      "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Quality ff.json\" \"assets/fastflags_presets/quality.json\")"
     ]
   }
 }

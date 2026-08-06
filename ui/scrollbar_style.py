@@ -145,14 +145,22 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     background: none;
     border: none;
 }}
-/* border-radius répété ici : add-page/sub-page sont des rectangles de
-   remplissage SÉPARÉS du cadre QScrollBar:vertical lui-même — sans leur
-   propre rayon, ils gardent des coins carrés au tout premier/dernier bout
-   de la piste (juste avant le thumb, à l'opposé), peu importe le
-   border-radius déjà posé sur le cadre englobant. */
+/* Transparent (pas de background-color ni border-radius propres) : le fond
+   arrondi de QScrollBar:vertical ci-dessus, peint UNE SEULE fois sur tout le
+   rail, reste visible tel quel derrière. Un essai précédent leur donnait
+   background-color + border-radius identiques au rail pour éviter des coins
+   carrés à la pointe de la piste (quand le thumb n'occupe pas cette
+   extrémité) — mais ce rectangle de remplissage devient très court quand le
+   thumb est tout en haut/tout en bas (add-page ou sub-page proche de 0px de
+   hauteur), et un rectangle plus court que le rayon dégénère en coin CARRÉ
+   plein (confirmé par échantillonnage de pixels réel : plage de gris opaque
+   sans aucun dégradé d'anti-aliasing, exactement à l'endroit où le thumb
+   touche une extrémité) — même famille de bug que celle documentée dans
+   CLAUDE.md pour les coins du tableau Fast Flags. Rester transparent laisse
+   le rail (un seul rectangle, TOUJOURS de pleine hauteur, jamais dégénéré)
+   porter seul l'arrondi des deux bouts, dans tous les cas. */
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
-    background-color: {_GROOVE_COLOR.name()};
-    border-radius: {radius}px;
+    background: transparent;
 }}
 """
 

@@ -1,0 +1,20 @@
+{
+    "DFIntTaskSchedulerTargetFps": "10000",
+    "FFlagDebugGraphicsPreferVulkan": "True",
+    "DFFlagDebugPauseVoxelizer": "True",
+    "FFlagHandleAltEnterFullscreenManually": "True",
+    "DFIntDebugFRMQualityLevelOverride": "1",
+    "FIntDefaultMeshCacheSizeMB": "512",
+    "FIntMeshContentProviderForceCacheSize": "536870912",
+    "FIntRenderLocalLightUpdatesMin": "1",
+    "FIntRenderLocalLightUpdatesMax": "1",
+    "DFIntAnimationLodFacsDistanceMax": "0",
+    "DFIntAnimationLodFacsDistanceMin": "0",
+    "DFIntAnimationLodFacsVisibilityDenominator": "0",
+    "FIntHSRClusterSymmetryDistancePercent": "10000",
+    "FIntTerrainOTAMaxTextureSize": "1024",
+    "FIntUITextureMaxRenderTextureSize": "1024",
+    "DFFlagDisableDPIScale": "True",
+    "FIntFRMMaxGrassDistance": "500",
+    "FIntFRMMinGrassDistance": "0"
+}

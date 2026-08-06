@@ -43,9 +43,18 @@ class MacroRecorder(QObject):
     """`stopped_by_escape` est émis quand Échap est détectée pendant
     l'enregistrement : l'UI doit encore appeler stop() elle-même (ce signal
     ne fait qu'informer, il n'arrête rien tout seul), pour rester le seul
-    point qui met à jour l'état visuel du bouton d'enregistrement."""
+    point qui met à jour l'état visuel du bouton d'enregistrement.
+
+    `step_recorded`/`step_delay_updated` permettent à l'UI d'afficher chaque
+    ligne au fur et à mesure de l'enregistrement plutôt qu'attendre stop() :
+    émis depuis les threads d'écoute pynput (jamais le thread GUI), comme
+    stopped_by_escape déjà — Qt met en file d'attente la livraison vers le
+    thread GUI automatiquement (connexion en file d'attente entre threads),
+    aucune synchronisation manuelle nécessaire côté appelant."""
 
     stopped_by_escape = pyqtSignal()
+    step_recorded = pyqtSignal(object)  # MacroStep tout juste finalisé (delay_after_ms encore à 0)
+    step_delay_updated = pyqtSignal(int, int)  # (index dans la séquence, delay_after_ms corrigé)
 
     def __init__(self, exclude_rect: QRect | None = None, parent=None):
         super().__init__(parent)
@@ -86,14 +95,18 @@ class MacroRecorder(QObject):
     def _mark_gap_before_new_action(self, press_time: float) -> None:
         if self._steps and self._last_release_time is not None:
             delay_ms = max(0, round((press_time - self._last_release_time) * 1000))
-            self._steps[-1].delay_after_ms = delay_ms
+            index = len(self._steps) - 1
+            self._steps[index].delay_after_ms = delay_ms
             self._last_release_time = None
+            self.step_delay_updated.emit(index, delay_ms)
 
     def _finalize_step(self, action: str, value: str, x: int, y: int, press_time: float) -> None:
         release_time = time.perf_counter()
         hold_ms = max(0, round((release_time - press_time) * 1000))
-        self._steps.append(MacroStep(action=action, value=value, x=x, y=y, hold_ms=hold_ms, delay_after_ms=0))
+        step = MacroStep(action=action, value=value, x=x, y=y, hold_ms=hold_ms, delay_after_ms=0)
+        self._steps.append(step)
         self._last_release_time = release_time
+        self.step_recorded.emit(step)
 
     # ------------------------------------------------------------------
     def _on_key_press(self, key) -> None:

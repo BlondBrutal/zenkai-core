@@ -11,16 +11,49 @@ mêmes élimine complètement le risque.
 """
 from PyQt6.QtCore import QRectF, QSize, Qt, QPropertyAnimation, pyqtProperty
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QPushButton, QSizePolicy
 
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 
 
 class AnimatedButton(QPushButton):
-    def __init__(self, text: str, variant: str = "primary", parent=None, text_color: str | None = None):
+    def __init__(
+        self, text: str, variant: str = "primary", parent=None, text_color: str | None = None,
+        height: int = 42, horizontal_padding: int = 56, font_pixel_size: int | None = None,
+    ):
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(42)
+        self._height = height
+        self._horizontal_padding = horizontal_padding
+        self.setFixedHeight(height)
+        # Taille de police en PIXELS (setPixelSize), pas en points (le
+        # défaut ci-dessous, 10pt, ne vaut ~13.3px qu'à 96 DPI — un écart
+        # fractionnaire qui grandit encore sous une mise à l'échelle DPI non
+        # standard). Pour un bouton qui doit matcher au pixel près un autre
+        # bouton stylé en QSS avec "font-size: 13px" (ex: .secondaryButton,
+        # voir theme.qss), passer font_pixel_size=13 garantit une taille de
+        # texte réellement identique, pas juste approximativement proche.
+        self._font = QFont("Segoe UI Variable Text")
+        if font_pixel_size is not None:
+            self._font.setPixelSize(font_pixel_size)
+        else:
+            self._font.setPointSize(10)
+        self._font.setWeight(QFont.Weight.DemiBold)
+        # Posé aussi comme police RÉELLE du widget (pas seulement utilisée
+        # par le painter dans paintEvent) : sizeHint() ci-dessous mesure le
+        # texte via self.fontMetrics(), qui reflète la police DU WIDGET —
+        # sans ce setFont(), sizeHint() aurait mesuré une police différente
+        # (héritée du QSS global) de celle réellement peinte, désynchronisant
+        # la largeur calculée du texte effectivement affiché.
+        self.setFont(self._font)
+        # QPushButton grandit/rétrécit par défaut au-delà de sizeHint() dès
+        # qu'un layout a de la place à distribuer (politique "Preferred") —
+        # ce bouton se dimensionne lui-même entièrement via sizeHint() (texte
+        # + marge), donc Fixed sur les deux axes garantit qu'il s'affiche
+        # EXACTEMENT à cette taille, peu importe l'espace restant dans son
+        # conteneur (constaté : sans ça, 2 boutons voisins pouvaient rendre
+        # plus larges que leur sizeHint calculé, malgré un padding réduit).
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._variant = variant
 
         if variant == "primary":
@@ -68,7 +101,7 @@ class AnimatedButton(QPushButton):
 
     def sizeHint(self) -> QSize:
         text_width = self.fontMetrics().horizontalAdvance(self.text())
-        return QSize(text_width + 56, 42)
+        return QSize(text_width + self._horizontal_padding, self._height)
 
     def enterEvent(self, event) -> None:
         self._animate_to(self._hover, 150)
@@ -111,7 +144,7 @@ class AnimatedButton(QPushButton):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect, 10, 10)
             painter.setPen(QColor(STATUS_NEUTRAL))
-            painter.setFont(QFont("Segoe UI Variable Text", 10, QFont.Weight.DemiBold))
+            painter.setFont(self._font)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
             return
 
@@ -128,5 +161,5 @@ class AnimatedButton(QPushButton):
             painter.drawRoundedRect(rect, 10, 10)
 
         painter.setPen(self._text_color)
-        painter.setFont(QFont("Segoe UI Variable Text", 10, QFont.Weight.DemiBold))
+        painter.setFont(self._font)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())

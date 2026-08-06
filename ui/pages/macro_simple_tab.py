@@ -292,6 +292,7 @@ class MacroSimpleSlot(QWidget):
         # l'interface, voir key_capture_widget.py.
         self.hotkey_capture = KeyCaptureWidget(exclude_click_buttons=True)
         self.hotkey_capture.setFixedSize(_HOTKEY_FIELD_WIDTH, _FIELD_HEIGHT)
+        self.hotkey_capture.keyChanged.connect(self._on_hotkey_field_changed)
 
         self.mode_combo = StyledDropdown()
         for _, label_key in _MODE_OPTIONS:
@@ -351,12 +352,6 @@ class MacroSimpleSlot(QWidget):
         self.record_btn = AnimatedButton(t("page.macro.simple.record_btn"), variant="neutral")
         self.record_btn.clicked.connect(self._on_record_clicked)
 
-        # Ne montre plus jamais "N étape(s) enregistrée(s)" : ne sert plus
-        # qu'à signaler l'enregistrement EN COURS (voir _start_recording/
-        # _stop_recording), vide le reste du temps.
-        self.record_status_label = QLabel("")
-        self.record_status_label.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {STATUS_NEUTRAL};")
-
         self.view_coords_btn = AnimatedButton(t("page.macro.simple.view_coords_btn"), variant="neutral")
         self.view_coords_btn.clicked.connect(self._on_view_coords_clicked)
 
@@ -364,7 +359,6 @@ class MacroSimpleSlot(QWidget):
         row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addWidget(self.record_btn)
         row.addWidget(self.view_coords_btn)
-        row.addWidget(self.record_status_label)
         row.addStretch(1)
         return row
 
@@ -800,25 +794,40 @@ class MacroSimpleSlot(QWidget):
             self._start_recording()
 
     def _start_recording(self) -> None:
+        # Vide le tableau AVANT de commencer : l'enregistrement remplace
+        # toujours la séquence actuellement affichée (comme avant), sauf que
+        # les nouvelles lignes arrivent maintenant une par une au fur et à
+        # mesure plutôt que toutes d'un coup à l'arrêt (voir
+        # _on_step_recorded/_on_step_delay_updated).
+        self._populate_table([])
+
         window = self.window()
         exclude_rect = window.frameGeometry() if window is not None else None
         self._recorder = MacroRecorder(exclude_rect=exclude_rect, parent=self)
         self._recorder.stopped_by_escape.connect(self._stop_recording)
+        self._recorder.step_recorded.connect(self._on_step_recorded)
+        self._recorder.step_delay_updated.connect(self._on_step_delay_updated)
         self._recorder.start()
 
         self.record_btn.setText(t("page.macro.simple.stop_record_btn"))
-        self.record_status_label.setText(t("page.macro.simple.recording_status"))
-        self.record_status_label.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {STATUS_CRITICAL};")
+
+    def _on_step_recorded(self, step: MacroStep) -> None:
+        self._add_step_row(step)
+
+    def _on_step_delay_updated(self, index: int, delay_ms: int) -> None:
+        # Le délai d'une étape n'est connu qu'une fois l'action SUIVANTE
+        # commencée (voir recorder.py) : la ligne apparaît donc d'abord avec
+        # "0", puis se corrige toute seule dès que la prochaine action démarre.
+        delay_spin = self._cell_widget(index, COL_DELAY)
+        if delay_spin is not None:
+            delay_spin.setValue(delay_ms)
 
     def _stop_recording(self) -> None:
         if self._recorder is None:
             return
-        steps = self._recorder.stop()
+        self._recorder.stop()
         self._recorder = None
-        self._populate_table(steps)
         self.record_btn.setText(t("page.macro.simple.record_btn"))
-        self.record_status_label.setText("")
-        self.record_status_label.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {STATUS_NEUTRAL};")
 
     # ------------------------------------------------------------------
     # Construction / validation de la config
@@ -835,8 +844,19 @@ class MacroSimpleSlot(QWidget):
             self.validation_label.setVisible(True)
             return None
 
-        self.validation_label.setVisible(False)
         mode, _ = _MODE_OPTIONS[self.mode_combo.currentIndex()]
+        # Hold/Toggle bouclent la séquence SANS LIMITE tant que la macro est
+        # active (voir _start_player) : sans un seul délai après une étape,
+        # rien ne freine cette boucle — un enchaînement en rafale, à pleine
+        # vitesse CPU, potentiellement des milliers de passages par seconde.
+        # Le mode Répétition n'est pas concerné : borné par son propre
+        # nombre de passages, il s'arrête de lui-même même sans délai.
+        if mode in (TRIGGER_HOLD, TRIGGER_TOGGLE) and not any(step.delay_after_ms > 0 for step in steps):
+            self.validation_label.setText(t("page.macro.simple.error_no_delay"))
+            self.validation_label.setVisible(True)
+            return None
+
+        self.validation_label.setVisible(False)
         return MacroSimpleConfig(
             name=name,
             hotkey=hotkey,
@@ -874,6 +894,24 @@ class MacroSimpleSlot(QWidget):
         self.status_label.setText(t("page.macro.simple.status_listening"))
         self.status_label.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {STATUS_OK};")
 
+    def _on_hotkey_field_changed(self, new_key: str) -> None:
+        """Si la macro est déjà armée (interrupteur "Activer" ON) et qu'on
+        change la touche de déclenchement pendant qu'elle tourne, réarme
+        immédiatement l'écoute native sur la nouvelle touche (l'ancienne
+        redevient libre) plutôt que d'attendre un cycle OFF/ON — même
+        principe de prise en compte immédiate que pour le reste de la
+        config (voir _refresh_armed_config)."""
+        if self._hotkey_listener is None or self._armed_config is None:
+            return
+        if not new_key or new_key == self._armed_config.hotkey:
+            return
+        self._hotkey_listener.stop()
+        self._hotkey_listener = HotkeyTriggerListener(new_key, self)
+        self._hotkey_listener.pressed.connect(self._on_hotkey_pressed)
+        self._hotkey_listener.released.connect(self._on_hotkey_released)
+        self._hotkey_listener.start()
+        self._refresh_armed_config()
+
     def stop_if_running(self) -> None:
         """Appelé par MacroSimpleTab quand le coupe-circuit global est
         désactivé, ou quand cet emplacement est supprimé."""
@@ -903,9 +941,25 @@ class MacroSimpleSlot(QWidget):
     # ------------------------------------------------------------------
     # Rejeu déclenché par la touche de déclenchement (Hold/Toggle/Répétition)
     # ------------------------------------------------------------------
+    def _refresh_armed_config(self) -> None:
+        """Relit la config actuellement affichée à l'écran (touches,
+        timings, mode, répétitions...) juste avant de (dé)déclencher le
+        rejeu : une macro active applique ainsi immédiatement toute
+        modification faite pendant qu'elle tourne, sans avoir à désactiver
+        puis réactiver l'interrupteur "Activer". Si l'édition en cours rend
+        la config momentanément invalide (ex : toutes les lignes supprimées),
+        on garde la dernière config valide plutôt que d'interrompre
+        brutalement une macro déjà armée."""
+        if self._armed_config is None:
+            return
+        fresh = self._build_macro_config(self._armed_config.name)
+        if fresh is not None:
+            self._armed_config = fresh
+
     def _on_hotkey_pressed(self) -> None:
         if self._armed_config is None:
             return
+        self._refresh_armed_config()
         running = self._player is not None and self._player.isRunning()
         mode = self._armed_config.trigger_mode
 

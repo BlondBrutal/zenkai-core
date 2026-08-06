@@ -28,3 +28,23 @@ Règle à appliquer systématiquement, à chaque session :
 
 Le dossier `keygen/` et les fichiers sensibles (`.env`, logs) sont déjà
 exclus via `.gitignore` — ne jamais les retirer de cette exclusion.
+
+## Bug récurrent connu : "trou" dans les coins arrondis des tableaux
+
+Symptôme : sur un widget de type tableau (QTableWidget) stylé avec des
+coins arrondis, un petit "trou"/interstice apparaît à la pointe de
+chaque coin (les 4 coins sont touchés de la même façon), comme si la
+bordure et le fond n'étaient pas parfaitement alignés.
+
+Cause identifiée (résolu une première fois sur la page Fast Flags) :
+la bordure (border) du widget est bien arrondie (border-radius), mais
+le FOND (background-color) est une couche distincte avec des angles
+"pointus"/carrés légèrement plus grands que le rayon de la bordure —
+le coin carré du fond dépasse et traverse la bordure arrondie.
+
+Fix : appliquer EXACTEMENT le même border-radius au fond qu'à la
+bordure, sur le même élément ET sur tous les éléments empilés à cet
+endroit (widget principal, viewport, tout conteneur de fond) — pas
+seulement la bordure visible. Si un autre tableau de l'app affiche le
+même symptôme, appliquer directement ce fix plutôt que de repartir de
+zéro sur le diagnostic.

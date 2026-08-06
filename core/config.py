@@ -16,6 +16,7 @@ DEFAULT_SETTINGS = {
     "first_run_done": False,
     "auto_apply_fastflags_on_launch": False,
     "active_fastflags_preset": None,
+    "fastflags_globally_enabled": True,
     "performance_live_monitoring_enabled": True,
     "macros_globally_enabled": True,
     "risk_analysis_enabled": True,
