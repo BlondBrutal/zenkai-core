@@ -13,32 +13,42 @@ Cliquer un élément de la Bibliothèque ne fait que le SÉLECTIONNER
 (surbrillance) : il faut cliquer explicitement "Ouvrir" pour charger son
 contenu dans l'éditeur (ce système à deux temps remplace une ancienne
 confirmation par popup, devenue inutile puisqu'aucun clic accidentel ne peut
-plus écraser la config en cours). Charger un preset n'écrit rien sur le
-disque tant que l'utilisateur n'a pas cliqué "Appliquer" explicitement — un
-seul chemin d'écriture réelle sur tout le fichier ClientAppSettings.json
-(voir _on_apply), pour toujours pouvoir relire/modifier avant de committer.
+plus écraser la config en cours).
+
+Bootstrapper Roblox (voir features/fastflags/launcher.py et protocol.py) :
+il n'y a plus de bouton "Appliquer" qui écrit une fois pour toutes — à la
+place, "Lancer Roblox" (_on_launch_clicked) injecte le contenu du tableau
+dans le vrai ClientAppSettings.json PUIS lance RobloxPlayerBeta.exe, et
+cette même injection se reproduit à CHAQUE lancement (y compris via le
+protocole roblox-player:// intercepté, sans que cette page soit ouverte) —
+voir la configuration "active" persistée par le launcher, garantissant que
+les flags choisis survivent même si Roblox modifie le fichier entre deux
+lancements.
 
 show_recommendation() reste le point d'accroche utilisé par la page
 Performance (bouton "Optimiser pour Roblox" → bottleneck détecté → preset
 recommandé, voir main_window.py) : son bouton charge directement le preset
 recommandé dans l'éditeur.
 """
+import os
+
 from PyQt6.QtCore import QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
-    QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QInputDialog,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-    QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
+    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
+    QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.config import config
 from core.i18n import t
+from core.paths import get_fastflags_active_config_path
+from features.fastflags import launcher, protocol
 from features.fastflags.manager import (
     PRESETS, delete_custom_preset, detect_active_preset, detect_value_type,
-    get_known_flags, import_flags_file, list_custom_presets,
-    load_custom_preset, read_current_flags, reset_to_default,
-    save_custom_preset, write_flags,
+    export_flags_file, get_known_flags, import_flags_file, list_custom_presets,
+    load_custom_preset, read_current_flags, reset_to_default, save_custom_preset,
 )
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
@@ -149,7 +159,11 @@ _DELETE_COL_WIDTH = 46
 _ACTION_BTN_HEIGHT = 40
 _ACTION_BTN_PADDING = 36
 _ACTION_BTN_FONT_SIZE = 13
-_ACTION_GAP = 4
+# Même écart que celui entre "Ajouter un flag"/"Parcourir les flags" (voir
+# top_row.setSpacing(8) dans _build_editor_column) : les 3 boutons du bas
+# (Lancer Roblox/Enregistrer/Réinitialiser) sont maintenant groupés
+# ensemble, donc cohérents avec l'écart déjà utilisé en haut de page.
+_ACTION_GAP = 8
 
 # Même couleur que le fond général de l'app (QMainWindow, QWidget#centralWidget
 # dans theme.qss) : réutilisée ici pour le fond du tableau (point 8) et celui
@@ -334,7 +348,19 @@ class _PreserveForegroundDelegate(QStyledItemDelegate):
         super().paint(painter, option, index)
 
     def createEditor(self, parent, option, index):
-        return _GreenCursorLineEdit(parent)
+        editor = _GreenCursorLineEdit(parent)
+        # Sans ça, l'éditeur reste aligné à gauche (défaut de QLineEdit) même
+        # pour une colonne dont l'item est centré (ex: Valeur, voir
+        # _append_row) — le texte "sautait" visuellement du centre de la
+        # cellule vers la gauche au moment d'entrer en édition, donné
+        # vérifié comme la vraie cause du "changement d'apparence" signalé
+        # (la couleur, elle, était déjà correcte). On reprend l'alignement
+        # RÉEL de l'item plutôt que de le figer en dur pour cette colonne :
+        # ça reste correct si l'alignement change un jour.
+        alignment = index.data(Qt.ItemDataRole.TextAlignmentRole)
+        if alignment is not None:
+            editor.setAlignment(Qt.AlignmentFlag(alignment))
+        return editor
 
 
 class _GreenCursorLineEdit(QLineEdit):
@@ -549,9 +575,10 @@ class FastFlagsPage(BasePage):
         main_row.addWidget(self._build_library_column())
         self.content_layout().addLayout(main_row, 1)
 
-        self._populate_table(read_current_flags())
+        self._populate_table(self._load_initial_flags())
         self._refresh_library()
         self._refresh_status()
+        self._verify_protocol_registration()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -561,6 +588,11 @@ class FastFlagsPage(BasePage):
         # ne jamais écraser une édition en cours simplement parce que
         # l'utilisateur a changé d'onglet puis est revenu).
         self._refresh_status()
+        # Vérifie que l'association roblox-player:// est toujours valide à
+        # chaque ouverture de la page — Roblox pourrait l'avoir écrasée (peu
+        # probable, voir protocol.py, mais jamais supposé impossible), ou
+        # l'utilisateur/un nettoyeur de registre pourrait l'avoir retirée.
+        self._verify_protocol_registration()
         # Recalculé à chaque affichage réel (pas seulement à la construction,
         # voir _build_editor_column) : la hauteur RÉELLE de l'en-tête
         # (.height(), pas .sizeHint()) n'est fiable qu'une fois le widget
@@ -582,10 +614,15 @@ class FastFlagsPage(BasePage):
         )
 
     # ------------------------------------------------------------------
-    # Kill switch global : désactive les Fast Flags d'un coup (réinitialise
-    # le vrai fichier Roblox), même concept que "Macros actives" sur la page
-    # Macro (voir MacroPage._build_kill_switch_control) — persisté (voir
-    # core/config.py, "fastflags_globally_enabled").
+    # Interrupteur global "Fast Flags actifs" : un seul contrôle pour deux
+    # effets (fusionnés pour libérer de la place, voir demande utilisateur —
+    # avant, deux barres séparées) : activer applique les flags du tableau
+    # ET enregistre l'interception du protocole roblox-player:// (voir
+    # features/fastflags/protocol.py) ; désactiver vide le vrai fichier
+    # Roblox ET désinscrit l'interception (retour au lancement natif de
+    # Roblox). Même concept que "Macros actives" sur la page Macro pour la
+    # partie flags — persisté (voir core/config.py,
+    # "fastflags_globally_enabled" / "auto_apply_fastflags_on_launch").
     # ------------------------------------------------------------------
     def _build_kill_switch_control(self) -> QWidget:
         wrapper = QWidget()
@@ -597,21 +634,58 @@ class FastFlagsPage(BasePage):
         label.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {STATUS_NEUTRAL};")
         row.addWidget(label)
 
-        self.kill_switch = ToggleSwitch(checked=bool(config.get("fastflags_globally_enabled", True)))
+        # Coché seulement si les DEUX étaient déjà actifs : un utilisateur
+        # qui avait seulement les flags actifs (avant la fusion des deux
+        # interrupteurs, quand l'interception était un réglage séparé
+        # désactivé par défaut) ne doit jamais se retrouver avec
+        # l'interception activée silencieusement du jour au lendemain.
+        initial_enabled = (
+            bool(config.get("fastflags_globally_enabled", True))
+            and bool(config.get("auto_apply_fastflags_on_launch", False))
+        )
+        self.kill_switch = ToggleSwitch(checked=initial_enabled)
         self.kill_switch.toggled.connect(self._on_kill_switch_toggled)
         row.addWidget(self.kill_switch)
 
         return wrapper
 
     def _on_kill_switch_toggled(self, checked: bool) -> None:
-        config.set("fastflags_globally_enabled", checked)
-        if not checked:
-            # Même principe que le kill switch Macro (stoppe l'existant tout
-            # de suite) : vide le vrai fichier Roblox, sans toucher au
-            # contenu de l'éditeur (l'utilisateur peut réactiver puis
-            # rappliquer la même configuration ensuite).
+        # Effet immédiat sur l'interception : si l'écriture/suppression
+        # registre échoue, on revient à l'état précédent plutôt que de
+        # laisser l'interrupteur mentir sur l'état réel (registre vs config
+        # désynchronisés) — jamais d'échec silencieux (voir protocol.py).
+        if checked:
+            if not protocol.register():
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
+                self.kill_switch.setChecked(False, animate=False)
+                return
+            config.set("auto_apply_fastflags_on_launch", True)
+        else:
+            if not protocol.unregister():
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_unregister_error"))
+                self.kill_switch.setChecked(True, animate=False)
+                return
+            config.set("auto_apply_fastflags_on_launch", False)
+            # Même principe qu'avant la fusion (stoppe l'existant tout de
+            # suite) : vide le vrai fichier Roblox, sans toucher au contenu
+            # de l'éditeur (l'utilisateur peut réactiver puis rappliquer la
+            # même configuration ensuite).
             reset_to_default()
-            self._refresh_status()
+        config.set("fastflags_globally_enabled", checked)
+        self._refresh_status()
+
+    def _verify_protocol_registration(self) -> None:
+        # Filet de sécurité silencieux (pas de barre de statut dédiée,
+        # retirée pour libérer de la place) : si l'interception est censée
+        # être active mais que le registre a dérivé (Roblox, l'utilisateur,
+        # ou un nettoyeur de registre a pu le modifier), tente une
+        # réparation silencieuse — et seulement si CETTE tentative échoue,
+        # prévient clairement l'utilisateur (jamais un échec totalement
+        # silencieux, voir protocol.py).
+        if not self.kill_switch.isChecked():
+            return
+        if protocol.health_check() != "ok" and not protocol.register():
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
 
     # ------------------------------------------------------------------
     # Zone d'édition (tableau nom/valeur/type + recherche + actions)
@@ -664,6 +738,16 @@ class FastFlagsPage(BasePage):
         # virer le texte au gris clair générique (theme.qss), notamment la
         # colonne Valeur (normalement verte).
         self.table.setItemDelegate(_PreserveForegroundDelegate(self.table))
+        # CurrentChanged (en plus des déclencheurs par défaut) : un simple
+        # clic change la cellule "courante", donc ouvre déjà l'éditeur — sans
+        # ça, Qt exige un double-clic (ou F2/taper directement) pour entrer
+        # en édition.
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.CurrentChanged
+            | QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+            | QAbstractItemView.EditTrigger.AnyKeyPressed
+        )
         self.table.setHorizontalHeaderLabels([
             t("page.fastflags.col_name"), t("page.fastflags.col_value"),
             t("page.fastflags.col_type"), "",
@@ -695,26 +779,25 @@ class FastFlagsPage(BasePage):
         # _fix_header_and_scrollbar.
         self._fix_header_and_scrollbar()
 
-        # "Appliquer" seul à gauche, "Enregistrer"/"Réinitialiser" groupés à
-        # droite (le stretch entre les deux groupes s'en charge, voir
-        # plus bas) — même style neutre pour les 3 (pas de mise en avant
-        # turquoise), écart IDENTIQUE entre "Enregistrer" et "Réinitialiser"
-        # (_ACTION_GAP, via setSpacing). Boutons en taille compacte
-        # (_ACTION_BTN_HEIGHT/_ACTION_BTN_PADDING), plus petits que la taille
-        # par défaut d'AnimatedButton mais plus grands que la première
-        # tentative.
+        # "Lancer Roblox" — remplace l'ancien "Appliquer" : ce n'est plus une
+        # simple écriture disque, c'est l'action principale de la page
+        # (injecte les Fast Flags puis lance le jeu, voir
+        # _on_launch_clicked), mais même style neutre (contour fin, pas de
+        # remplissage plein) que "Enregistrer"/"Réinitialiser" — pas de mise
+        # en avant particulière. Les 3 boutons sont groupés ensemble en bas
+        # à droite (stretch en tête, pas entre eux), écart IDENTIQUE à celui
+        # du haut de page entre "Ajouter un flag"/"Parcourir les flags"
+        # (_ACTION_GAP, via setSpacing).
         action_row = QHBoxLayout()
         action_row.setSpacing(_ACTION_GAP)
-        self.apply_btn = AnimatedButton(
-            t("page.fastflags.apply_btn"), variant="neutral",
+        action_row.addStretch(1)
+        self.launch_btn = AnimatedButton(
+            t("page.fastflags.launch_btn"), variant="neutral",
             height=_ACTION_BTN_HEIGHT, horizontal_padding=_ACTION_BTN_PADDING,
             font_pixel_size=_ACTION_BTN_FONT_SIZE,
         )
-        self.apply_btn.clicked.connect(self._on_apply)
-        action_row.addWidget(self.apply_btn)
-        # "Appliquer" reste seul à gauche : le stretch ici (au lieu qu'en fin
-        # de ligne) pousse "Enregistrer"/"Réinitialiser" groupés à droite.
-        action_row.addStretch(1)
+        self.launch_btn.clicked.connect(self._on_launch_clicked)
+        action_row.addWidget(self.launch_btn)
         self.save_preset_btn = AnimatedButton(
             t("page.fastflags.save_preset_btn"), variant="neutral",
             height=_ACTION_BTN_HEIGHT, horizontal_padding=_ACTION_BTN_PADDING,
@@ -732,6 +815,19 @@ class FastFlagsPage(BasePage):
         layout.addLayout(action_row)
 
         return container
+
+    def _load_initial_flags(self) -> dict:
+        # Priorité à la configuration "active" du bootstrapper (voir
+        # features/fastflags/launcher.py) une fois qu'elle existe : elle
+        # reflète l'intention réelle de l'utilisateur, plus fiable que le
+        # vrai fichier Roblox (volatil, Roblox peut le modifier entre deux
+        # lancements). Tant qu'elle n'existe pas encore (l'utilisateur n'a
+        # jamais cliqué "Lancer Roblox"), comportement historique inchangé :
+        # afficher ce qui est RÉELLEMENT dans le fichier Roblox.
+        active_path = get_fastflags_active_config_path()
+        if os.path.isfile(active_path):
+            return load_custom_preset(active_path)
+        return read_current_flags()
 
     def _populate_table(self, flags: dict) -> None:
         # Bloque itemChanged pendant le remplissage programmatique : sinon
@@ -863,6 +959,16 @@ class FastFlagsPage(BasePage):
         self.import_btn.clicked.connect(self._on_import_clicked)
         layout.addWidget(self.import_btn)
 
+        # "Exporter" : même principe que sur la Bibliothèque Macro (écrit le
+        # preset sélectionné — intégré ou personnalisé — dans un fichier JSON
+        # choisi par l'utilisateur). Toujours visible, désactivé tant que
+        # rien n'est sélectionné (voir _on_library_item_selected).
+        self.export_btn = QPushButton(t("page.fastflags.library_export_btn"))
+        self.export_btn.setProperty("class", "secondaryButton")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._on_export_clicked)
+        layout.addWidget(self.export_btn)
+
         layout.addSpacing(6)
 
         # Liste et message "vide" partagent une même zone (QStackedWidget),
@@ -902,6 +1008,7 @@ class FastFlagsPage(BasePage):
     def _refresh_library(self) -> None:
         self.library_list.clear()
         self.open_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
         query = self.library_search_input.text().strip().lower()
 
         for key in _PRESET_ORDER:
@@ -928,6 +1035,10 @@ class FastFlagsPage(BasePage):
         # Sélectionne seulement (surbrillance) : ne charge rien dans
         # l'éditeur tant que "Ouvrir" n'est pas cliqué explicitement.
         self.open_btn.setEnabled(True)
+        # Exportable dans tous les cas (preset intégré ou personnalisé) —
+        # contrairement à "Supprimer" (menu contextuel), jamais restreint
+        # aux presets personnalisés.
+        self.export_btn.setEnabled(True)
 
     def _on_library_context_menu(self, pos) -> None:
         """Clic droit sur un élément de la Bibliothèque : menu avec
@@ -953,12 +1064,26 @@ class FastFlagsPage(BasePage):
         item = self.library_list.currentItem()
         if item is None:
             return
+        self._populate_table(self._resolve_item_flags(item))
+
+    def _on_export_clicked(self) -> None:
+        item = self.library_list.currentItem()
+        if item is None:
+            return
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, t("page.fastflags.library_export_btn"), f"{item.text()}.json", "JSON (*.json)"
+        )
+        if not dest_path:
+            return
+        export_flags_file(self._resolve_item_flags(item), dest_path)
+
+    @staticmethod
+    def _resolve_item_flags(item: QListWidgetItem) -> dict:
         kind = item.data(_ROLE_KIND)
         identifier = item.data(Qt.ItemDataRole.UserRole)
         if kind == "builtin":
-            self._populate_table(PRESETS[identifier])
-        else:
-            self._populate_table(load_custom_preset(identifier))
+            return PRESETS[identifier]
+        return load_custom_preset(identifier)
 
     def _on_import_clicked(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1011,18 +1136,26 @@ class FastFlagsPage(BasePage):
             self._populate_table(PRESETS[self._recommended_preset_key])
 
     # ------------------------------------------------------------------
-    # Appliquer / Réinitialiser (les deux seuls chemins qui écrivent
-    # réellement sur le disque, voir docstring du module)
+    # Lancer Roblox / Réinitialiser (voir features/fastflags/launcher.py
+    # pour le détail de l'injection + lancement)
     # ------------------------------------------------------------------
-    def _on_apply(self) -> None:
-        if write_flags(self._collect_flags_from_table()):
-            self._refresh_status()
-            show_info(self, t("page.fastflags.title"), t("page.fastflags.apply_success"))
+    def _on_launch_clicked(self) -> None:
+        result = launcher.launch_roblox([], flags_override=self._collect_flags_from_table())
+        self._refresh_status()
+        if not result.roblox_found:
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.roblox_not_found_error"))
+        elif not result.injection_ok:
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.launch_injection_failed_warning"))
         else:
-            show_warning(self, t("page.fastflags.title"), t("page.fastflags.apply_error"))
+            show_info(self, t("page.fastflags.title"), t("page.fastflags.launch_success"))
 
     def _on_reset(self) -> None:
         if reset_to_default():
+            # Vide aussi la configuration active (voir launcher.py) : sans
+            # ça, un futur lancement via le protocole (sans cette page
+            # ouverte) réappliquerait quand même l'ancienne configuration
+            # mémorisée, annulant silencieusement ce "Réinitialiser".
+            launcher.clear_active_config()
             self._populate_table({})
             self._refresh_status()
             show_info(self, t("page.fastflags.title"), t("page.fastflags.reset_success"))

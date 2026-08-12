@@ -188,6 +188,14 @@ def delete_custom_preset(path: str) -> None:
         logger.warning("Suppression du preset personnalisé impossible (%s)", exc)
 
 
+def export_flags_file(flags: dict, dest_path: str) -> bool:
+    """Écrit `flags` (preset intégré OU personnalisé, peu importe l'origine)
+    dans un fichier JSON choisi par l'utilisateur — export "à plat", sans
+    lien avec le système de presets de la Bibliothèque (contrairement à
+    save_custom_preset, qui enregistre DANS ce système)."""
+    return _write_json_dict(dest_path, flags)
+
+
 # ------------------------------------------------------------------
 # Base de "flags connus" (panneau "Parcourir les flags connus") : une base
 # de départ ("seed", assets/fastflags_presets/known_flags.json) extraite des

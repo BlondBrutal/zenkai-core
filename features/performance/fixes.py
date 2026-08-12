@@ -18,6 +18,7 @@ import winreg
 from ctypes import wintypes
 
 from core.elevation import is_admin
+from core.security_log import log_event
 from features.performance.status_cards import HIGH_PERFORMANCE_GUID
 
 logger = logging.getLogger("zenkaiontop.performance")
@@ -109,31 +110,40 @@ def set_power_plan_high_performance() -> bool:
             capture_output=True, text=True, timeout=5, errors="replace",
             **_hidden_subprocess_kwargs(),
         )
-        return result.returncode == 0
+        success = result.returncode == 0
+        log_event("fix_power_plan", HIGH_PERFORMANCE_GUID, "ok" if success else "error", sensitive=True)
+        return success
     except Exception as exc:
         logger.error("Impossible de changer le plan d'alimentation : %s", exc)
+        log_event("fix_power_plan", HIGH_PERFORMANCE_GUID, "error", sensitive=True)
         return False
 
 
 def enable_game_mode() -> bool:
+    target = r"HKCU\Software\Microsoft\GameBar"
     try:
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\GameBar")
         with key:
             winreg.SetValueEx(key, "AllowAutoGameMode", 0, winreg.REG_DWORD, 1)
+        log_event("fix_game_mode", target, "ok", sensitive=True)
         return True
     except Exception as exc:
         logger.error("Impossible d'activer le Mode Jeu : %s", exc)
+        log_event("fix_game_mode", target, "error", sensitive=True)
         return False
 
 
 def disable_game_dvr() -> bool:
+    target = r"HKCU\System\GameConfigStore"
     try:
         key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"System\GameConfigStore")
         with key:
             winreg.SetValueEx(key, "GameDVR_Enabled", 0, winreg.REG_DWORD, 0)
+        log_event("fix_game_dvr", target, "ok", sensitive=True)
         return True
     except Exception as exc:
         logger.error("Impossible de désactiver Xbox Game Bar / DVR : %s", exc)
+        log_event("fix_game_dvr", target, "error", sensitive=True)
         return False
 
 
@@ -146,7 +156,10 @@ def disable_sysmain() -> bool:
         "Set-Service -Name SysMain -StartupType Disabled"
     )
     try:
-        return _run_elevated_powershell(command)
+        success = _run_elevated_powershell(command)
+        log_event("fix_sysmain", "SysMain", "ok" if success else "error", sensitive=True)
+        return success
     except Exception as exc:
         logger.error("Impossible de désactiver SysMain : %s", exc)
+        log_event("fix_sysmain", "SysMain", "error", sensitive=True)
         return False

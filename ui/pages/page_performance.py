@@ -22,6 +22,7 @@ from core.config import config
 from core.i18n import t
 from features.performance.fixes import disable_game_dvr, disable_sysmain, enable_game_mode, set_power_plan_high_performance
 from features.performance.fps_monitor import FpsMonitorThread
+from features.performance.game_detection import ROBLOX_EXE_NAME, detect_foreground_game
 from features.performance.live_monitor import LiveMonitorThread, LiveSample
 from features.performance.overlay import ALL_ELEMENTS, PerformanceOverlay
 from features.performance.ping_monitor import PingMonitorThread
@@ -1401,7 +1402,20 @@ class PerformancePage(BasePage):
         optimize_row = QHBoxLayout()
         optimize_row.setSpacing(10)
 
-        self.optimize_btn = AnimatedButton(t("page.performance.optimize_btn"), variant="secondary")
+        # Détecté à chaque (re)construction de cette carte (donc à chaque
+        # scan) : le libellé du bouton reflète le jeu réellement au premier
+        # plan à ce moment-là, pas une valeur figée au démarrage de l'app.
+        # Mémorisé sur l'instance pour que _show_optimize_summary sache,
+        # plus tard, si la recommandation Fast Flags (pertinente seulement
+        # pour Roblox) doit s'afficher.
+        detected_game = detect_foreground_game()
+        self._optimize_detected_exe = detected_game[0] if detected_game is not None else None
+        if detected_game is not None:
+            btn_label = t("page.performance.optimize_btn_game").format(game=detected_game[1])
+        else:
+            btn_label = t("page.performance.optimize_btn_windows")
+
+        self.optimize_btn = AnimatedButton(btn_label, variant="secondary")
         self.optimize_btn.clicked.connect(lambda: self._on_optimize_clicked(result))
         optimize_row.addWidget(self.optimize_btn)
 
@@ -1458,15 +1472,23 @@ class PerformancePage(BasePage):
         else:
             body = f"<p>{t('page.performance.optimize_none_needed')}</p>"
 
-        # Le preset Fast Flags le plus adapté est recommandé, pas appliqué :
-        # la lecture/écriture réelle de ClientAppSettings.json n'existe pas
-        # encore (Partie 2.2 du brief, pas encore construite) — on ne fait
-        # jamais semblant d'avoir fait quelque chose de réel.
-        preset_name = t(_PRESET_NAME_KEYS.get(result.recommended_preset, "page.fastflags.preset_balanced"))
-        body += (
-            f'<p style="color:{STATUS_NEUTRAL};">'
-            f'{t("page.performance.optimize_preset_line").format(preset=preset_name)}</p>'
-        )
+        # La recommandation de preset Fast Flags n'a de sens que pour Roblox
+        # (les Fast Flags sont un mécanisme propre au client Roblox) : pour
+        # tout autre jeu détecté, ou si aucun jeu connu n'est au premier
+        # plan (libellé neutre "Optimiser pour Windows"), on s'arrête aux 4
+        # corrections Windows génériques ci-dessus, sans cette section.
+        is_roblox = self._optimize_detected_exe == ROBLOX_EXE_NAME
+        if is_roblox:
+            # Le preset Fast Flags le plus adapté est recommandé, pas
+            # appliqué : la lecture/écriture réelle de ClientAppSettings.json
+            # n'existe pas encore (Partie 2.2 du brief, pas encore
+            # construite) — on ne fait jamais semblant d'avoir fait quelque
+            # chose de réel.
+            preset_name = t(_PRESET_NAME_KEYS.get(result.recommended_preset, "page.fastflags.preset_balanced"))
+            body += (
+                f'<p style="color:{STATUS_NEUTRAL};">'
+                f'{t("page.performance.optimize_preset_line").format(preset=preset_name)}</p>'
+            )
 
         msg = QMessageBox(self)
         msg.setWindowTitle(t("page.performance.optimize_summary_title"))
@@ -1474,8 +1496,9 @@ class PerformancePage(BasePage):
         msg.setText(body)
         msg.exec()
 
-        reason = t(result.bottleneck.reason_key).format(**result.bottleneck.reason_kwargs)
-        self.boost_requested.emit(result.recommended_preset, reason)
+        if is_roblox:
+            reason = t(result.bottleneck.reason_key).format(**result.bottleneck.reason_kwargs)
+            self.boost_requested.emit(result.recommended_preset, reason)
 
     def _build_config_card(self, result: ScanResult) -> QFrame:
         specs = result.specs

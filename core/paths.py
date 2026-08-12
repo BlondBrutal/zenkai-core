@@ -61,3 +61,40 @@ def get_fastflags_known_flags_path() -> str:
     l'utilisateur (voir features/fastflags/manager.py:get_known_flags) —
     séparé du dossier des presets pour ne pas apparaître comme un preset."""
     return os.path.join(get_app_data_dir(), "fastflags_known_learned.json")
+
+
+def get_fastflags_active_config_path() -> str:
+    """Configuration Fast Flags "active" : celle que le bootstrapper (voir
+    features/fastflags/launcher.py) réinjecte dans le vrai fichier Roblox à
+    CHAQUE lancement, y compris quand ce lancement est déclenché par le
+    protocole roblox-player:// (sans que l'app/le tableau ne soit ouvert).
+    Distincte à la fois du vrai fichier Roblox (volatil, Roblox peut le
+    modifier) et de la bibliothèque de presets (fastflags_presets/,
+    alimentée par "Enregistrer") : ce fichier représente uniquement
+    "la dernière configuration que l'utilisateur a explicitement lancée"."""
+    return os.path.join(get_app_data_dir(), "active_fastflags.json")
+
+
+def get_fastflags_backup_path() -> str:
+    """Copie du VRAI ClientAppSettings.json telle qu'elle était juste avant
+    la toute première écriture faite par cette app — jamais réécrite après
+    coup (voir features/fastflags/launcher.py:ensure_backup_exists)."""
+    return os.path.join(get_app_data_dir(), "ClientAppSettings.json.bak")
+
+
+def get_security_log_path() -> str:
+    """Journal de sécurité (voir core/security_log.py) : une ligne JSON par
+    action "sensible" (écriture registre, modification de
+    ClientAppSettings.json, élévation UAC...), consultable depuis la page
+    Paramètres. Séparé du log applicatif classique
+    (get_logs_dir()/zenkaiontop.log) pour rester lisible même quand
+    celui-ci devient verbeux (erreurs techniques, traces de debug...)."""
+    return os.path.join(get_logs_dir(), "security_events.jsonl")
+
+
+def get_fastflags_backup_marker_path() -> str:
+    """Marqueur JSON ({"existed": bool}) indiquant si la sauvegarde
+    ci-dessus a déjà été prise, et si le vrai fichier existait à ce
+    moment-là (sinon "restaurer l'original" doit supprimer le fichier
+    plutôt que d'y recopier un contenu qui n'a jamais existé)."""
+    return os.path.join(get_app_data_dir(), "fastflags_backup_marker.json")

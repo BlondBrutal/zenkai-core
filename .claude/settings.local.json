@@ -121,7 +121,8 @@
       "Bash(rm -f out_liverec.log)",
       "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Hard ff.json\" \"assets/fastflags_presets/hard.json\")",
       "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Balanced ff.json\" \"assets/fastflags_presets/balanced.json\")",
-      "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Quality ff.json\" \"assets/fastflags_presets/quality.json\")"
+      "Bash(cp \"C:/Users/Blond/Downloads/Roblox/Quality ff.json\" \"assets/fastflags_presets/quality.json\")",
+      "Bash(git log *)"
     ]
   }
 }

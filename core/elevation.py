@@ -75,4 +75,13 @@ def relaunch_as_admin() -> bool:
     result = ctypes.windll.shell32.ShellExecuteW(None, "runas", target, params, workdir, 0)
     # ShellExecuteW retourne une valeur > 32 en cas de succès ; sinon un code
     # d'erreur (ex. 5 = accès refusé, si l'utilisateur refuse le prompt UAC).
-    return result > 32
+    success = result > 32
+    # Import différé (pas en tête de fichier) : core/elevation.py est
+    # importé très tôt dans main.py, avant même setup_logging() — on évite
+    # ainsi tout risque d'alourdir cet import précoce, alors que
+    # core/security_log.py lui-même n'a besoin d'aucune configuration
+    # préalable pour écrire sa propre ligne (voir sa docstring).
+    from core.security_log import log_event
+
+    log_event("uac_elevation", target, "ok" if success else "error", sensitive=True)
+    return success

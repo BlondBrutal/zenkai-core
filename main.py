@@ -17,6 +17,21 @@ from core.i18n import set_language
 
 
 def main() -> int:
+    # Lancement intercepté via le protocole roblox-player:// (voir
+    # features/fastflags/protocol.py) : Windows invoque cette app avec l'URI
+    # d'origine en argument, à chaque clic sur "Jouer" sur le site Roblox ou
+    # un raccourci existant. Doit être vérifié AVANT tout le reste (élévation
+    # UAC, QApplication, fenêtre principale) — ce chemin doit être quasi
+    # instantané et invisible, pas un rappel UAC à chaque lancement de jeu.
+    # "roblox-player:" (juste le préfixe, pas "://") : plus tolérant si
+    # jamais l'URI est transmise sans les deux slashs.
+    if sys.platform == "win32" and len(sys.argv) > 1 and sys.argv[1].startswith("roblox-player:"):
+        setup_logging()
+        from features.fastflags.launcher import launch_roblox
+
+        launch_roblox(sys.argv[1:])
+        return 0
+
     if sys.platform == "win32":
         # Élévation UAC classique, redemandée à chaque lancement tant que le
         # process n'est pas déjà admin (voir core/elevation.py — le
