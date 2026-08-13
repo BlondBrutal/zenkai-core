@@ -49,6 +49,67 @@ seulement la bordure visible. Si un autre tableau de l'app affiche le
 même symptôme, appliquer directement ce fix plutôt que de repartir de
 zéro sur le diagnostic.
 
+## Architecture : Custom Script / interpréteur AutoHotkey
+
+La page Custom Script (`ui/pages/page_custom_script.py`,
+`features/custom_script/`) n'utilise PAS une installation AutoHotkey
+système par défaut : un interpréteur **AutoHotkey v2 portable est embarqué
+directement dans le dépôt**, sous `assets/runtime/ahk/`
+(`AutoHotkey64.exe`, `AutoHotkey32.exe`, `license.txt`). C'est cette copie
+qui est utilisée en priorité (voir
+`features/custom_script/ahk_detect.py::find_embedded_ahk_interpreter`) —
+aucune installation système n'est nécessaire en usage normal.
+
+Une détection d'installation système (registre
+`HKLM`/`HKCU\SOFTWARE\AutoHotkey`, ou `%ProgramFiles%\AutoHotkey`) reste un
+**repli secondaire uniquement**, pour le cas résiduel où la copie embarquée
+serait absente/corrompue — jamais le chemin normal. Ce repli reconnaît à la
+fois les noms d'exécutables v2 (`AutoHotkey64.exe`/`AutoHotkey32.exe`/
+`AutoHotkeyUX.exe`) et v1.1 classiques (`AutoHotkeyU64.exe`/etc.), au cas où
+seule une installation v1.1 traînerait sur le PC — mais l'analyse
+heuristique (`features/custom_script/heuristics.py`) et tous les textes UI
+ciblent la syntaxe **v2**.
+
+Si un nouveau composant a besoin de lancer l'interpréteur, toujours passer
+par `find_ahk_interpreter()` (jamais coder en dur un chemin) et par
+`features/custom_script/process_manager.py::start_script`/`stop_script`
+pour le suivi/arrêt fiable (jamais un `subprocess.Popen` fire-and-forget).
+
+**Lancement dé-élevé (`features/custom_script/deelevate.py`)** : quand
+l'app tourne élevée (`core.elevation.is_admin()`), un script est lancé via
+une **tâche planifiée Windows temporaire et jetable** (COM
+`Schedule.Service`, enregistrée directement à la RACINE du Planificateur
+`"\\"` — jamais un sous-dossier dédié, voir plus bas —, nom unique par
+lancement, `RunLevel=TASK_RUNLEVEL_LUA`, supprimée juste après avoir
+récupéré le PID via `IRunningTask.EnginePID`) — **jamais**
+`CreateProcessAsUser` avec un jeton dupliqué. Cette première approche a été
+essayée puis abandonnée : elle suppose `SeAssignPrimaryTokenPrivilege` sur
+le jeton appelant, un privilège **absent par défaut d'un jeton
+Administrateur standard même élevé via UAC** (seuls SYSTEM et certains
+comptes de service l'ont) — un problème structurel de Windows, pas une
+question de correctif. Le service Planificateur de tâches tourne en SYSTEM
+et possède ce privilège lui-même, donc construit le jeton dé-élevé à notre
+place. Ne jamais revenir à `CreateProcessAsUser`/duplication de jeton pour
+ce besoin précis sans d'abord relire cette note.
+
+Une deuxième version rangeait ces tâches dans un sous-dossier dédié
+`\ZenkaiCore\` (`GetFolder`/`CreateFolder`) — abandonné aussi : cause d'un
+`ERROR_ALREADY_EXISTS` récurrent dont la cause exacte est restée
+introuvable malgré plusieurs correctifs (repli sur relecture, logging
+détaillé de l'échec initial de `GetFolder`...). La racine `"\\"` existe
+TOUJOURS nativement (jamais besoin de `GetFolder`/`CreateFolder`) ; le nom
+de tâche unique (UUID) et le nettoyage immédiat après usage suffisent déjà
+à éviter toute collision/résidu. Ne jamais réintroduire de sous-dossier
+dédié pour ce besoin précis sans d'abord relire cette note.
+
+Précision pour ne pas confondre avec un bug déjà rencontré : ceci n'a
+**aucun rapport** avec l'ancien mécanisme "tâche planifiée avec privilèges
+élevés" retiré du projet (bug de fenêtre fantôme/boucle) — celui-là servait
+à faire tourner TOUTE L'APP élevée sans reprompt UAC à chaque démarrage
+(auto-élévation persistante). Ici, la tâche est un lanceur ponctuel pour UN
+SEUL process enfant, au niveau LUA (dé-élevé, pas élevé), supprimée en
+quelques secondes — sans rapport avec la séquence de démarrage de l'app.
+
 ## Design system — Zenkai Core
 
 Base établie (extraite de `assets/styles/theme.qss`, `ui/status_colors.py`,
@@ -93,11 +154,23 @@ rendu au montage dynamique) :
   (`STATUS_CRITICAL`) — action destructive, sans faire ressortir le
   bouton au repos.
 
-**Tableaux/listes** : jamais de fond plein au clic/sélection
+**Tableaux/listes** : jamais de fond plein au clic/sélection/survol
 (`QTableWidget::item:selected { background-color: transparent; }`) — seule
 la couleur du curseur de texte ou un léger halo turquoise
 (`rgba(23,184,151,40)`) marquent un état sélectionné/actif, jamais un
-aplat de couleur.
+aplat de couleur. S'applique aussi à `QListWidget` : le style app-wide
+(`theme.qss`) donne par défaut un fond turquoise translucide à
+`QListWidget::item:selected` — pour une liste dont les lignes portent déjà
+leur propre widget peint (badge coloré, interrupteur...), surcharger
+localement sur l'instance (`list_widget.setStyleSheet(...)`, jamais
+`theme.qss` globalement) pour repasser `:hover`/`:selected` en
+`background-color: transparent`. Attention au **double padding** dans ce
+cas : `QListWidget::item` a un `padding: 6px 8px` app-wide qui s'additionne
+aux marges internes du widget de ligne (`QHBoxLayout.setContentsMargins`)
+— si la ligne contient un élément à hauteur fixe (ex. `ToggleSwitch`,
+24px), ce padding en trop peut le faire paraître coupé/mal centré ; repasser
+aussi `QListWidget::item { padding: 0px; }` dans la même surcharge locale
+et laisser les marges du widget de ligne être la seule source de padding.
 
 Quand une nouvelle préférence visuelle récurrente émerge en cours de
 projet (ex: comportement de clic, style d'un nouveau type de composant),

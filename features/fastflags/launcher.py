@@ -29,7 +29,7 @@ from core.paths import (
     get_fastflags_active_config_path, get_fastflags_backup_marker_path,
     get_fastflags_backup_path,
 )
-from core.security_log import log_event
+from core.security_log import Category, log_event
 from features.fastflags.manager import (
     export_flags_file, get_client_app_settings_path, load_custom_preset,
     write_flags,
@@ -83,10 +83,10 @@ def ensure_backup_exists() -> None:
         if existed:
             shutil.copy2(real_path, get_fastflags_backup_path())
         export_flags_file({"existed": existed}, marker_path)
-        log_event("fastflags_backup", real_path, "ok", sensitive=True)
+        log_event("fastflags_backup", Category.FILE_MODIFY, real_path, "ok")
     except Exception as exc:
         logger.error("Sauvegarde de ClientAppSettings.json impossible (%s)", exc)
-        log_event("fastflags_backup", real_path, "error", sensitive=True)
+        log_event("fastflags_backup", Category.FILE_MODIFY, real_path, "error")
 
 
 def restore_original() -> bool:
@@ -104,11 +104,11 @@ def restore_original() -> bool:
             shutil.copy2(get_fastflags_backup_path(), real_path)
         elif os.path.isfile(real_path):
             os.remove(real_path)
-        log_event("fastflags_restore", real_path, "ok", sensitive=True)
+        log_event("fastflags_restore", Category.FILE_MODIFY, real_path, "ok")
         return True
     except Exception as exc:
         logger.error("Restauration de ClientAppSettings.json impossible (%s)", exc)
-        log_event("fastflags_restore", real_path, "error", sensitive=True)
+        log_event("fastflags_restore", Category.FILE_MODIFY, real_path, "error")
         return False
 
 
@@ -160,7 +160,7 @@ def launch_roblox(original_args: list[str], flags_override: dict | None = None) 
     except Exception as exc:
         logger.error("Injection des Fast Flags échouée, lancement quand même : %s", exc)
         injection_ok = False
-    log_event("fastflags_inject", real_path, "ok" if injection_ok else "error", sensitive=True)
+    log_event("fastflags_inject", Category.FILE_MODIFY, real_path, "ok" if injection_ok else "error")
 
     exe_path = find_roblox_player_exe()
     if exe_path is None:
@@ -171,8 +171,10 @@ def launch_roblox(original_args: list[str], flags_override: dict | None = None) 
         subprocess.Popen([exe_path] + original_args, cwd=os.path.dirname(exe_path))
     except OSError as exc:
         logger.error("Impossible de lancer RobloxPlayerBeta.exe (%s)", exc)
+        log_event("roblox_launch", Category.EXTERNAL_EXECUTION, exe_path, "error")
         return LaunchResult(started=False, roblox_found=True, injection_ok=injection_ok, error=str(exc))
 
+    log_event("roblox_launch", Category.EXTERNAL_EXECUTION, exe_path, "ok")
     return LaunchResult(started=True, roblox_found=True, injection_ok=injection_ok)
 
 

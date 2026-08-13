@@ -34,6 +34,7 @@ from ui.pages.page_risk import RiskControlsPanel
 from ui.ring_gauge import RingGauge
 from ui.scrollbar_style import style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
+from ui.styled_message_box import show_confirm
 from ui.toggle_switch import ToggleSwitch
 
 # Icône power et loader partagent exactement la même taille : le loader doit
@@ -520,6 +521,20 @@ _AUTO_FIXES = {
     "sysmain": disable_sysmain,
 }
 
+# Texte d'avertissement affiché AVANT chaque correction (voir
+# _StatusCardWidget._run_auto_fix et PerformancePage._on_optimize_clicked) :
+# ces 4 corrections écrivent toutes dans une catégorie sensible du journal
+# de sécurité (REGISTRY_WRITE, EXTERNAL_EXECUTION ou SERVICE_CONTROL, voir
+# core/security_log.py) — un clic sur "Corriger"/"Optimiser" est un
+# changement de configuration ponctuel et explicite, donc averti, à la
+# différence du chemin de lancement du jeu (volontairement sans friction).
+_FIX_CONFIRM_TEXT_KEYS = {
+    "power_plan": "page.performance.fix_confirm_power_plan",
+    "game_mode": "page.performance.fix_confirm_game_mode",
+    "game_dvr": "page.performance.fix_confirm_game_dvr",
+    "sysmain": "page.performance.fix_confirm_sysmain",
+}
+
 
 class _FixWorker(QThread):
     """Applique une correction dans un thread séparé : certaines (SysMain)
@@ -713,6 +728,13 @@ class _StatusCardWidget(QFrame):
         self.toggle_btn.setText(t("page.performance.fix_btn_hide") if showing else t("page.performance.fix_btn_show"))
 
     def _run_auto_fix(self) -> None:
+        confirm_text_key = _FIX_CONFIRM_TEXT_KEYS.get(self.card.card_id)
+        if confirm_text_key and not show_confirm(
+            self, t("dialog.security_warning_title"), t(confirm_text_key),
+            confirm_label=t("page.performance.fix_confirm_btn"),
+        ):
+            return
+
         # Exécuté dans un thread séparé : certaines corrections (SysMain)
         # demandent une élévation UAC et peuvent donc attendre plusieurs
         # secondes la réponse de l'utilisateur — jamais bloquer l'UI pendant
@@ -1394,7 +1416,18 @@ class PerformancePage(BasePage):
         title.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {STATUS_OK};")
         layout.addWidget(title)
 
-        desc = QLabel(t("page.performance.optimize_desc"))
+        # Détecté à chaque (re)construction de cette carte (donc à chaque
+        # scan) : le libellé du bouton ET le texte descriptif reflètent le
+        # jeu réellement au premier plan à ce moment-là, pas une valeur
+        # figée au démarrage de l'app. Mémorisé sur l'instance pour que
+        # _show_optimize_summary sache, plus tard, si la recommandation Fast
+        # Flags (pertinente seulement pour Roblox) doit s'afficher.
+        detected_game = detect_foreground_game()
+        self._optimize_detected_exe = detected_game[0] if detected_game is not None else None
+        is_roblox = self._optimize_detected_exe == ROBLOX_EXE_NAME
+
+        desc_key = "page.performance.optimize_desc_roblox" if is_roblox else "page.performance.optimize_desc_generic"
+        desc = QLabel(t(desc_key))
         desc.setWordWrap(True)
         desc.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
         layout.addWidget(desc)
@@ -1402,14 +1435,6 @@ class PerformancePage(BasePage):
         optimize_row = QHBoxLayout()
         optimize_row.setSpacing(10)
 
-        # Détecté à chaque (re)construction de cette carte (donc à chaque
-        # scan) : le libellé du bouton reflète le jeu réellement au premier
-        # plan à ce moment-là, pas une valeur figée au démarrage de l'app.
-        # Mémorisé sur l'instance pour que _show_optimize_summary sache,
-        # plus tard, si la recommandation Fast Flags (pertinente seulement
-        # pour Roblox) doit s'afficher.
-        detected_game = detect_foreground_game()
-        self._optimize_detected_exe = detected_game[0] if detected_game is not None else None
         if detected_game is not None:
             btn_label = t("page.performance.optimize_btn_game").format(game=detected_game[1])
         else:
@@ -1433,6 +1458,12 @@ class PerformancePage(BasePage):
 
         if not fixable_ids:
             self._show_optimize_summary([])
+            return
+
+        if not show_confirm(
+            self, t("dialog.security_warning_title"), t("page.performance.optimize_confirm_text"),
+            confirm_label=t("page.performance.optimize_confirm_btn"),
+        ):
             return
 
         self.optimize_btn.setEnabled(False)

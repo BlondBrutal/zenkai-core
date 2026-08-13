@@ -1,6 +1,12 @@
 keygen/
 .env
 *.log
+# Journal de sécurité (core/security_log.py) : vit sous %APPDATA%\ZenkaiCore,
+# donc déjà hors du dépôt en usage normal — exclusion ajoutée par prudence,
+# au cas où get_app_data_dir() pointerait un jour vers un chemin du projet
+# (mode portable, dev...).
+security_events.jsonl
+logs/
 __pycache__/
 *.pyc
 *.pyo

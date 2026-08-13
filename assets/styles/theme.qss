@@ -204,6 +204,28 @@ QLineEdit:focus {
     outline: none;
 }
 
+/* QPlainTextEdit — premier usage de ce widget dans l'app (éditeur de script
+   Custom Script, voir ui/pages/page_custom_script.py). Même fond/bordure/
+   rayon que QLineEdit pour rester cohérent, mais police monospace : c'est
+   ici du code collé/importé, contrairement au reste de l'app en Segoe UI
+   Variable Text. */
+QPlainTextEdit {
+    border: 1px solid #33333C;
+    border-radius: 8px;
+    padding: 8px 10px;
+    background-color: #202027;
+    color: #E7E9EE;
+    font-family: "Consolas";
+    font-size: 12.5px;
+    selection-background-color: #17B897;
+    selection-color: #0E1C19;
+}
+
+QPlainTextEdit:focus {
+    border: 1px solid #33333C;
+    outline: none;
+}
+
 QSpinBox {
     border: 1px solid #33333C;
     border-radius: 8px;

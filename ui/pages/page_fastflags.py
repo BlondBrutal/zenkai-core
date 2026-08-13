@@ -54,7 +54,7 @@ from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
 from ui.scrollbar_style import style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
-from ui.styled_message_box import show_info, show_warning
+from ui.styled_message_box import show_confirm, show_info, show_warning
 from ui.toggle_switch import ToggleSwitch
 
 _PRESET_NAME_KEYS = {
@@ -173,13 +173,18 @@ _APP_BACKGROUND = "#1A1A1F"
 # Séparateurs internes (lignes de ligne/en-tête) : restent discrets, cohérents
 # avec le reste de l'app.
 _TABLE_BORDER_COLOR = "#2A2A32"
-# Contour EXTÉRIEUR du cadre arrondi : plus clair que _TABLE_BORDER_COLOR
-# (~16 niveaux d'écart sur le fond #1A1A1F suffisaient à peine à distinguer
-# un trait de 1px) et plus épais (3px) pour une courbe nette et bien visible,
-# vérifiée sur une VRAIE capture d'écran Windows (voir _RoundedTableCard).
-_TABLE_CARD_BORDER_COLOR = "#3D3D48"
-_TABLE_CARD_BORDER_WIDTH = 3.0
-_TABLE_CARD_RADIUS = 14
+# Contour EXTÉRIEUR du cadre arrondi : identique à celui de la zone d'édition
+# de la page Custom Script (QPlainTextEdit, voir assets/styles/theme.qss —
+# "border: 1px solid #33333C; border-radius: 8px;") — même couleur, même
+# épaisseur, même rayon, pour que les deux pages se lisent comme un seul
+# style de cadre cohérent dans toute l'app. (Ancienne valeur, abandonnée :
+# contour plus clair/épais #3D3D48/3px choisi pour la visibilité — le
+# nouveau réglage reste net sur une VRAIE capture d'écran Windows, voir
+# _RoundedTableCard, le seuil de sécurité de _TABLE_CARD_MARGIN ci-dessous
+# reste largement respecté à ce rayon plus petit.)
+_TABLE_CARD_BORDER_COLOR = "#33333C"
+_TABLE_CARD_BORDER_WIDTH = 1.0
+_TABLE_CARD_RADIUS = 8
 # Marge intérieure entre le cadre et son contenu (tableau) : SANS elle, le
 # QTableWidget (carré, fond plat, SANS son propre rayon d'arrondi) peint son
 # en-tête/son fond par-dessus le contour arrondi du cadre. Diagnostic précis :
@@ -655,6 +660,21 @@ class FastFlagsPage(BasePage):
         # laisser l'interrupteur mentir sur l'état réel (registre vs config
         # désynchronisés) — jamais d'échec silencieux (voir protocol.py).
         if checked:
+            # Avertissement AVANT d'écrire dans le registre (catégorie
+            # sensible PROTOCOL_HANDLER, voir core/security_log.py) : ce
+            # toggle est un changement de configuration ponctuel et
+            # explicite, pas le chemin de lancement du jeu (celui-ci — bouton
+            # "Lancer Roblox"/protocole — reste volontairement sans friction,
+            # voir la docstring de features/fastflags/launcher.py). Annuler
+            # revient au switch décoché SANS ré-émettre "toggled" (voir
+            # ToggleSwitch.setChecked), donc sans boucle.
+            if not show_confirm(
+                self, t("dialog.security_warning_title"),
+                t("page.fastflags.kill_switch_confirm_text"),
+                confirm_label=t("page.fastflags.kill_switch_confirm_btn"),
+            ):
+                self.kill_switch.setChecked(False, animate=False)
+                return
             if not protocol.register():
                 show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
                 self.kill_switch.setChecked(False, animate=False)

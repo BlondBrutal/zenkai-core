@@ -27,7 +27,7 @@ import sys
 import winreg
 
 from core.elevation import _dev_mode_executable
-from core.security_log import log_event
+from core.security_log import Category, log_event
 
 logger = logging.getLogger("zenkaiontop.fastflags.protocol")
 
@@ -106,11 +106,11 @@ def register() -> bool:
             winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
         with winreg.CreateKeyEx(_ROOT_HIVE, _COMMAND_SUBKEY, 0, winreg.KEY_WRITE) as key:
             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, get_expected_command())
-        log_event("protocol_register", f"HKCU\\{_ROOT_SUBKEY}", "ok", sensitive=True)
+        log_event("protocol_register", Category.PROTOCOL_HANDLER, f"HKCU\\{_ROOT_SUBKEY}", "ok")
         return True
     except OSError as exc:
         logger.error("Impossible d'enregistrer le protocole roblox-player:// (%s)", exc)
-        log_event("protocol_register", f"HKCU\\{_ROOT_SUBKEY}", "error", sensitive=True)
+        log_event("protocol_register", Category.PROTOCOL_HANDLER, f"HKCU\\{_ROOT_SUBKEY}", "error")
         return False
 
 
@@ -160,9 +160,9 @@ def unregister() -> bool:
     (permissions, etc.)."""
     try:
         _delete_key_recursive(_ROOT_HIVE, _ROOT_SUBKEY)
-        log_event("protocol_unregister", f"HKCU\\{_ROOT_SUBKEY}", "ok", sensitive=True)
+        log_event("protocol_unregister", Category.PROTOCOL_HANDLER, f"HKCU\\{_ROOT_SUBKEY}", "ok")
         return True
     except OSError as exc:
         logger.error("Impossible de désinscrire le protocole roblox-player:// (%s)", exc)
-        log_event("protocol_unregister", f"HKCU\\{_ROOT_SUBKEY}", "error", sensitive=True)
+        log_event("protocol_unregister", Category.PROTOCOL_HANDLER, f"HKCU\\{_ROOT_SUBKEY}", "error")
         return False

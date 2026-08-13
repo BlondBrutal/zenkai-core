@@ -92,6 +92,16 @@ def get_security_log_path() -> str:
     return os.path.join(get_logs_dir(), "security_events.jsonl")
 
 
+def get_custom_scripts_dir() -> str:
+    """Dossier des scripts AutoHotkey personnalisés (page Custom Script) :
+    un fichier .zkscript (JSON, texte du script + dernier verdict d'analyse)
+    par script, plus un .ahk compagnon régénéré à chaque lancement/scan —
+    voir features/custom_script/script_store.py."""
+    scripts_dir = os.path.join(get_app_data_dir(), "custom_scripts")
+    os.makedirs(scripts_dir, exist_ok=True)
+    return scripts_dir
+
+
 def get_fastflags_backup_marker_path() -> str:
     """Marqueur JSON ({"existed": bool}) indiquant si la sauvegarde
     ci-dessus a déjà été prise, et si le vrai fichier existait à ce

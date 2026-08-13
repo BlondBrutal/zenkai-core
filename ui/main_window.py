@@ -17,6 +17,7 @@ from ui.pages.page_cursor import CursorPage
 from ui.pages.page_performance import PerformancePage
 from ui.pages.page_fastflags import FastFlagsPage
 from ui.pages.page_settings import SettingsPage
+from ui.pages.page_custom_script import CustomScriptPage
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
@@ -88,8 +89,9 @@ class MainWindow(QMainWindow):
             "license": LicensePage(),
             "performance": PerformancePage(),
             "macro": MacroPage(),
-            "cursor": CursorPage(),
             "fastflags": FastFlagsPage(),
+            "custom_script": CustomScriptPage(),
+            "cursor": CursorPage(),
             "settings": SettingsPage(),
         })
         for key, widget in self.pages.items():

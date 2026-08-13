@@ -647,10 +647,18 @@ class PixelMacroTab(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        # -20% (18 -> 14), puis encore -20% (14 -> 11) : espace au-dessus/
+        # en dessous du trait de séparation vert (voir _build_green_separator)
+        # — un seul spacing gouverne les deux écarts entourant ce trait,
+        # layout n'ayant que 3 éléments visibles (_slots_layout, séparateur,
+        # add_row). Même réduction que macro_simple_tab.py, pour rester
+        # cohérent entre tous les sous-onglets Macro.
+        layout.setSpacing(11)
 
         self._slots_layout = QVBoxLayout()
-        self._slots_layout.setSpacing(18)
+        # -20% (18 -> 14), puis encore -20% (14 -> 11) : même réduction pour
+        # les traits verts ENTRE emplacements (voir _add_slot).
+        self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
         # Longueur mesurée pour s'arrêter exactement au bord DROIT du bouton

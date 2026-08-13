@@ -41,6 +41,7 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.elevation import is_admin
+from core.security_log import Category, log_event
 
 logger = logging.getLogger("zenkaiontop.performance")
 
@@ -91,42 +92,56 @@ def _run_elevated_hidden(exe_path: str, args: list[str], wait_seconds: Optional[
     normal, suivi ensuite via le fichier CSV taillé). Si le process courant
     est déjà élevé (voir core/elevation.py — l'app entière se relance en
     admin au démarrage), un simple subprocess.Popen suffit : pas besoin de
-    redemander un prompt UAC individuel pour cette action."""
-    if is_admin():
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = subprocess.SW_HIDE
-        proc = subprocess.Popen(
-            [exe_path, *args], creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startupinfo,
-        )
-        if wait_seconds is not None:
-            try:
-                proc.wait(timeout=wait_seconds)
-            except subprocess.TimeoutExpired:
-                logger.warning("Timeout en attendant PresentMon (déjà élevé)")
-        return
+    redemander un prompt UAC individuel pour cette action.
 
-    info = _ShellExecuteInfoW()
-    info.cbSize = ctypes.sizeof(_ShellExecuteInfoW)
-    info.fMask = _SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC
-    info.lpVerb = "runas"
-    info.lpFile = exe_path
-    info.lpParameters = subprocess.list2cmdline(args)
-    info.nShow = _SW_HIDE
-
-    if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)):
-        raise ctypes.WinError(ctypes.get_last_error())
-
-    if not info.hProcess:
-        return
+    Chaque appel (démarrage de capture ET --terminate_existing_session)
+    exécute réellement le binaire PresentMon embarqué : journalisé dans le
+    journal de sécurité (voir core/security_log.py) comme
+    Category.EXTERNAL_EXECUTION, succès ou échec, avant de (re)lever
+    l'exception vers l'appelant — la journalisation ne doit jamais changer
+    le comportement existant (fps_ready(None) sur échec), seulement
+    l'observer."""
     try:
-        if wait_seconds is not None:
-            timeout_ms = max(0, round(wait_seconds * 1000))
-            result = ctypes.windll.kernel32.WaitForSingleObject(info.hProcess, timeout_ms)
-            if result == _WAIT_FAILED:
-                logger.warning("WaitForSingleObject a échoué en attendant PresentMon élevé")
-    finally:
-        ctypes.windll.kernel32.CloseHandle(info.hProcess)
+        if is_admin():
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            proc = subprocess.Popen(
+                [exe_path, *args], creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startupinfo,
+            )
+            if wait_seconds is not None:
+                try:
+                    proc.wait(timeout=wait_seconds)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Timeout en attendant PresentMon (déjà élevé)")
+            return
+
+        info = _ShellExecuteInfoW()
+        info.cbSize = ctypes.sizeof(_ShellExecuteInfoW)
+        info.fMask = _SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC
+        info.lpVerb = "runas"
+        info.lpFile = exe_path
+        info.lpParameters = subprocess.list2cmdline(args)
+        info.nShow = _SW_HIDE
+
+        if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        if not info.hProcess:
+            return
+        try:
+            if wait_seconds is not None:
+                timeout_ms = max(0, round(wait_seconds * 1000))
+                result = ctypes.windll.kernel32.WaitForSingleObject(info.hProcess, timeout_ms)
+                if result == _WAIT_FAILED:
+                    logger.warning("WaitForSingleObject a échoué en attendant PresentMon élevé")
+        finally:
+            ctypes.windll.kernel32.CloseHandle(info.hProcess)
+    except Exception:
+        log_event("presentmon_launch", Category.EXTERNAL_EXECUTION, exe_path, "error")
+        raise
+    else:
+        log_event("presentmon_launch", Category.EXTERNAL_EXECUTION, exe_path, "ok")
 
 
 _ROLLING_WINDOW = 45  # ~0.5-1s de moyenne glissante à 60-90 FPS

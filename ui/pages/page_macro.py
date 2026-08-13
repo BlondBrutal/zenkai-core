@@ -405,10 +405,6 @@ class MacroPage(BasePage):
         title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
         layout.addWidget(title)
 
-        self.library_filter_label = QLabel()
-        self.library_filter_label.setStyleSheet("font-size: 11px; color: #9BA1AB;")
-        layout.addWidget(self.library_filter_label)
-
         layout.addSpacing(4)
 
         self.search_input = QLineEdit()
@@ -458,10 +454,6 @@ class MacroPage(BasePage):
         self.stack.setCurrentIndex(self._stack_index[macro_type])
         self._current_macro_type = macro_type
 
-        subtitle_key = next(s for k, _, s in _TAB_DEFS if k == macro_type)
-        self.library_filter_label.setText(
-            t("page.macro.library_filter_caption").format(type=t(subtitle_key))
-        )
         self._refresh_library()
 
     # ------------------------------------------------------------------

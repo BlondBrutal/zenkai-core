@@ -1147,10 +1147,20 @@ class MacroSimpleTab(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        # -20% (18 -> 14), puis encore -20% (14 -> 11) : espace au-dessus/
+        # en dessous du trait de séparation vert (voir _build_green_separator)
+        # — un seul spacing gouverne les deux écarts entourant ce trait,
+        # layout n'ayant que 3 éléments visibles (_slots_layout, séparateur,
+        # add_row).
+        layout.setSpacing(11)
 
         self._slots_layout = QVBoxLayout()
-        self._slots_layout.setSpacing(18)
+        # -20% (18 -> 14), puis encore -20% (14 -> 11) : même réduction pour
+        # les traits verts ENTRE emplacements (voir _add_slot) — même
+        # raisonnement, ce spacing ne gouverne que les écarts autour de ces
+        # séparateurs, jamais autre chose (un séparateur précède toujours
+        # chaque slot sauf le 1er).
+        self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
         # Longueur alignée sur la largeur du cadre du tableau (453px, voir

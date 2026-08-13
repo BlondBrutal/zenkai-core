@@ -15,9 +15,10 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 NAV_ITEMS = [
     ("license", "nav.license"),
-    ("macro", "nav.macro"),
     ("performance", "nav.performance"),
+    ("macro", "nav.macro"),
     ("fastflags", "nav.fastflags"),
+    ("custom_script", "nav.custom_script"),
     ("cursor", "nav.cursor"),
 ]
 

@@ -81,7 +81,7 @@ def relaunch_as_admin() -> bool:
     # ainsi tout risque d'alourdir cet import précoce, alors que
     # core/security_log.py lui-même n'a besoin d'aucune configuration
     # préalable pour écrire sa propre ligne (voir sa docstring).
-    from core.security_log import log_event
+    from core.security_log import Category, log_event
 
-    log_event("uac_elevation", target, "ok" if success else "error", sensitive=True)
+    log_event("uac_elevation", Category.ELEVATION, target, "ok" if success else "error")
     return success
