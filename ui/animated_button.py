@@ -19,7 +19,21 @@ from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 class AnimatedButton(QPushButton):
     def __init__(
         self, text: str, variant: str = "primary", parent=None, text_color: str | None = None,
-        height: int = 42, horizontal_padding: int = 56, font_pixel_size: int | None = None,
+        # Taille standard de l'app, calée sur les 2 boutons QSS
+        # ".secondaryButton" du haut de la page Fast Flags ("Ajouter un
+        # flag"/"Parcourir les flags") : dimensions RÉELLES mesurées via une
+        # vraie capture d'écran Windows (jamais hors-écran, voir
+        # CLAUDE.md/leçon déjà tirée sur ce point) — height=40 (identique
+        # pour les deux), horizontal_padding=38 (largeur du bouton moins la
+        # largeur de son texte via QFontMetrics.horizontalAdvance, la même
+        # méthode que sizeHint ci-dessous ; cohérent avec le calcul
+        # théorique de la QSS : padding 18px de chaque côté + 1px de bordure
+        # de chaque côté = 38). Remplace l'ancienne référence (boutons du
+        # haut de Custom Script, +15%) : uniformise tous les boutons de
+        # l'app SANS leur imposer une largeur identique — le padding
+        # s'ajoute à la largeur du texte (voir sizeHint ci-dessous), donc
+        # chaque bouton reste proportionnel à son propre texte.
+        height: int = 40, horizontal_padding: int = 38, font_pixel_size: int | None = None,
     ):
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)

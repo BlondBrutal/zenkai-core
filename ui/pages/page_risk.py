@@ -49,7 +49,7 @@ class RiskControlsPanel(QFrame):
         toggle_row = QHBoxLayout()
         toggle_row.setSpacing(8)
         toggle_label = QLabel(t("page.risk.toggle_label"))
-        toggle_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        toggle_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         toggle_row.addWidget(toggle_label)
         toggle_row.addStretch(1)
         self.analysis_toggle = ToggleSwitch(checked=bool(config.get("risk_analysis_enabled", True)))

@@ -23,6 +23,36 @@ _HANDLE_HOVER_COLOR = QColor("#1BDAB3")
 _THICKNESS = 10
 _MIN_HANDLE_LENGTH = 20
 
+# Règle globale (voir CLAUDE.md, section design system) : tout contenu
+# défilable (carte, tableau, éditeur, liste) doit réserver cet espace entre
+# son propre bord droit et sa scrollbar — jamais un contenu collé
+# directement contre la barre. Valeur reprise telle quelle des 3 correctifs
+# ad hoc qui existaient avant que cette règle soit centralisée ici
+# (page_custom_script.py, page_macro.py, page_performance.py avaient chacun
+# leur propre constante à 12).
+CONTENT_SCROLLBAR_GAP = 12
+
+
+def scrollarea_gap_qss(gap: int = CONTENT_SCROLLBAR_GAP) -> str:
+    """Fragment QSS (une seule déclaration, pas un bloc complet) à inclure
+    dans le stylesheet d'une QScrollArea pour détacher son contenu de la
+    scrollbar. JAMAIS un "margin" posé sur la QScrollBar elle-même : sans
+    effet ici (vérifié empiriquement, voir historique du projet) — c'est la
+    QScrollArea elle-même qu'il faut rogner via "padding", viewport ET
+    scrollbar se déplaçant ensemble. Retourne un fragment (pas un bloc
+    "QScrollArea { ... }" complet) pour rester composable avec le reste du
+    stylesheet de l'appelant (background/border/padding-top selon la page)."""
+    return f"padding-right: {gap}px;"
+
+
+def apply_viewport_scrollbar_gap(widget, gap: int = CONTENT_SCROLLBAR_GAP) -> None:
+    """Pour tout widget à scrollbar INTERNE (QListWidget, QTableWidget,
+    QPlainTextEdit... — tous des QAbstractScrollArea) : réserve le même
+    espace via setViewportMargins, l'API Qt native pour ça sur ces widgets
+    (contrairement à une QScrollArea "nue", où seule la voie QSS ci-dessus
+    fonctionne de façon fiable dans ce projet)."""
+    widget.setViewportMargins(0, 0, gap, 0)
+
 
 class RoundedScrollBarStyle(QProxyStyle):
     def pixelMetric(self, metric, option=None, widget=None):

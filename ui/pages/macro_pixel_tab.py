@@ -49,6 +49,7 @@ from features.macro_pixel.pixel_watcher import PixelWatcherThread
 from ui.animated_button import AnimatedButton
 from ui.key_capture_widget import KeyCaptureWidget, display_label
 from ui.pixel_picker_overlay import PixelPickerOverlay
+from ui.scrollbar_style import apply_viewport_scrollbar_gap
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 from ui.toggle_switch import ToggleSwitch
 from ui.trash_icon_button import TrashIconButton
@@ -58,6 +59,9 @@ _FIELD_HEIGHT = 32
 # "-99999" pour les coordonnées) plutôt qu'un espace vide inutile.
 _HEX_FIELD_WIDTH = 68
 _COORD_FIELD_WIDTH = 64
+# Largeur fixe des 3 boutons "Définir" (Réaction 1/Réaction 2/Alterner) —
+# voir le commentaire dans _build_reaction_keys_row pour le pourquoi.
+_KEY_CAPTURE_WIDTH = 100
 # Espacement label -> élément associé (x1.2 par rapport aux 6px d'origine).
 _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 _HEX_RE = re.compile(r"[^0-9A-Fa-f]")
@@ -115,16 +119,23 @@ class PixelMacroSlot(QWidget):
         QApplication.instance().aboutToQuit.connect(self._stop_watcher)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Marge droite (0 -> 14) : sans elle, les cartes "Détection"/
+        # "Réaction" (qui remplissent toute la largeur de ce layout, voir
+        # ci-dessous) touchaient quasiment la scrollbar de la page (voir
+        # MacroPage._build_tab_scroll_area) — la marge de la QScrollArea
+        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. _build_control_row
+        # compense cette marge (35 -> 21, soit -14) pour garder Réinitialiser
+        # aligné avec le groupe d'onglets "Macro type" au-dessus (mesure déjà
+        # empirique, voir son commentaire).
+        layout.setContentsMargins(0, 0, 14, 0)
         layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         control_row = self._build_control_row()
 
         layout.addLayout(self._build_header_row())
         layout.addLayout(self._build_name_row())
-        layout.addLayout(self._build_pixel_section())
-        layout.addLayout(self._build_reaction_keys_row())
-        layout.addLayout(self._build_cooldown_section())
+        layout.addWidget(self._build_detection_card())
+        layout.addWidget(self._build_reaction_card())
 
         self.validation_label = QLabel("")
         self.validation_label.setWordWrap(True)
@@ -142,7 +153,7 @@ class PixelMacroSlot(QWidget):
         row.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         self.slot_title_label = QLabel()
-        self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         row.addWidget(self.slot_title_label)
 
         if self._deletable:
@@ -183,20 +194,37 @@ class PixelMacroSlot(QWidget):
         column.addWidget(widget)
         return column
 
-    def _build_pixel_section(self) -> QVBoxLayout:
-        """Sélection du pixel : pas de cadre/carte autour (affiché à même la
-        page, comme le reste des champs). Bouton "Sélectionner un pixel" au
-        dessus, puis sur une même ligne : aperçu, couleur, Pixel X, Pixel Y —
-        chacun avec son label au-dessus, dans l'esprit de l'AHK d'origine."""
-        section = QVBoxLayout()
-        section.setSpacing(6)
+    @staticmethod
+    def _build_card(title_text: str) -> tuple[QFrame, QVBoxLayout]:
+        """Carte de groupe ("Détection"/"Réaction") : même style que les
+        cartes de la page Curseur (QFrame.card, voir theme.qss — fond
+        #1F1F25, bordure #2A2A32, rayon 14px) et même agencement interne
+        (marges/espacement/titre) que _CursorSection dans
+        ui/pages/page_cursor.py, pris comme référence explicite — sauf le
+        padding, réduit par rapport à cette référence, ces cartes-ci
+        contenant moins de contenu vertical (un titre + une seule ligne de
+        champs) qu'une section Curseur : haut/bas -40% (24 -> 14) puis -15%
+        supplémentaire (14 -> 12) ; gauche -30% (24 -> 17, mesuré par rendu
+        pixel réel) ; droite inchangée (24)."""
+        card = QFrame()
+        card.setProperty("class", "card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(17, 12, 24, 12)
+        layout.setSpacing(14)
 
-        self.pick_btn = AnimatedButton(t("page.macro.pixel.pick_btn"), variant="neutral")
-        self.pick_btn.clicked.connect(self._start_picking)
-        pick_row = QHBoxLayout()
-        pick_row.addWidget(self.pick_btn)
-        pick_row.addStretch(1)
-        section.addLayout(pick_row)
+        title = QLabel(title_text)
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
+        layout.addWidget(title)
+
+        return card, layout
+
+    def _build_detection_card(self) -> QFrame:
+        """Carte "Détection" : sur une même ligne, aperçu/couleur/Pixel X/
+        Pixel Y (chacun avec son label au-dessus, dans l'esprit de l'AHK
+        d'origine), puis le bouton "Sélectionner un pixel" EN DESSOUS (pas
+        au-dessus : on choisit d'abord de voir les champs déjà remplis avant
+        d'en changer la source)."""
+        card, layout = self._build_card(t("page.macro.pixel.detection_card_title"))
 
         # Même hauteur que les champs voisins (Couleur/Pixel X/Pixel Y),
         # pas un petit carré plaqué en haut d'un conteneur de cette hauteur :
@@ -232,23 +260,50 @@ class PixelMacroSlot(QWidget):
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_x_label"), self.x_input))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_y_label"), self.y_input))
         columns_row.addStretch(1)
-        section.addLayout(columns_row)
+        layout.addLayout(columns_row)
 
-        return section
+        # Après les champs (pas avant, voir docstring) — texte en couleur
+        # neutre standard (STATUS_NEUTRAL), pas l'accent turquoise habituel
+        # de variant="neutral" (voir ui/animated_button.py : ce nom désigne
+        # le CONTOUR gris, le texte reste turquoise par défaut) : ce bouton
+        # ne doit plus ressortir visuellement au milieu des champs déjà
+        # remplis.
+        self.pick_btn = AnimatedButton(
+            t("page.macro.pixel.pick_btn"), variant="neutral", text_color=STATUS_NEUTRAL,
+        )
+        self.pick_btn.clicked.connect(self._start_picking)
+        pick_row = QHBoxLayout()
+        pick_row.addWidget(self.pick_btn)
+        pick_row.addStretch(1)
+        layout.addLayout(pick_row)
 
-    def _build_reaction_keys_row(self) -> QHBoxLayout:
-        """Touche réaction 1 (déclenchée par le watcher), touche réaction 2
-        (celle avec laquelle le "changement rapide de touche" l'échange) et
-        la touche de swap elle-même (celle qui déclenche l'échange, écoutée
-        globalement — voir key_swap_listener.py), toutes les trois sur la
-        même ligne. Le swap est toujours actif dès qu'une touche de swap est
-        définie — pas de toggle séparé (repris de ChangementToucheHandler
-        dans l'AHK d'origine, sans le on/off de g_ChangementToucheEnabled)."""
+        return card
+
+    def _build_reaction_card(self) -> QFrame:
+        """Carte "Réaction" : touche réaction 1 (déclenchée par le watcher),
+        touche réaction 2 (celle avec laquelle le "changement rapide de
+        touche" l'échange), la touche de swap elle-même (celle qui déclenche
+        l'échange, écoutée globalement — voir key_swap_listener.py) et le
+        Cooldown (repris de TP_COOLDOWN_MS dans l'AHK d'origine, voir
+        pixel_watcher.py — toujours actif, pas de toggle séparé, un champ à
+        0/vide équivaut à aucun délai), tous les quatre sur une même ligne.
+        Le swap est toujours actif dès qu'une touche de swap est définie —
+        pas de toggle séparé (repris de ChangementToucheHandler dans l'AHK
+        d'origine, sans le on/off de g_ChangementToucheEnabled)."""
+        card, layout = self._build_card(t("page.macro.pixel.reaction_card_title"))
+
+        # Largeur fixe et IDENTIQUE pour les 3 boutons "Définir" (même
+        # principe que _HOTKEY_FIELD_WIDTH dans macro_simple_tab.py) : sans
+        # ça, chacun prend sa largeur naturelle (sizeHint), qui dépend du
+        # texte affiché (touche capturée ou "Définir") — donnant 3 largeurs
+        # différentes selon ce qui est configuré, au lieu d'une ligne
+        # régulière. KeyCaptureWidget élide proprement si le texte capturé
+        # ne tient pas (voir _refresh_text dans key_capture_widget.py).
         self.key_capture = KeyCaptureWidget()
-        self.key_capture.setFixedHeight(_FIELD_HEIGHT)
+        self.key_capture.setFixedSize(_KEY_CAPTURE_WIDTH, _FIELD_HEIGHT)
 
         self.swap_target_capture = KeyCaptureWidget()
-        self.swap_target_capture.setFixedHeight(_FIELD_HEIGHT)
+        self.swap_target_capture.setFixedSize(_KEY_CAPTURE_WIDTH, _FIELD_HEIGHT)
 
         # exclude_click_buttons=True : touche de DÉCLENCHEMENT du swap (voir
         # docstring ci-dessus) — clic gauche/droit réservés à l'usage normal
@@ -256,21 +311,9 @@ class PixelMacroSlot(QWidget):
         # key_capture/swap_target_capture ci-dessus (touches de RÉACTION :
         # le clic simulé PAR la macro, n'importe quel bouton est légitime).
         self.swap_key_capture = KeyCaptureWidget(exclude_click_buttons=True)
-        self.swap_key_capture.setFixedHeight(_FIELD_HEIGHT)
+        self.swap_key_capture.setFixedSize(_KEY_CAPTURE_WIDTH, _FIELD_HEIGHT)
         self.swap_key_capture.keyChanged.connect(lambda _key: self._sync_swap_listener())
 
-        row = QHBoxLayout()
-        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
-        row.addLayout(self._labeled_column(t("page.macro.pixel.reaction1_label"), self.key_capture))
-        row.addLayout(self._labeled_column(t("page.macro.pixel.reaction2_label"), self.swap_target_capture))
-        row.addLayout(self._labeled_column(t("page.macro.pixel.swap_key_label"), self.swap_key_capture))
-        row.addStretch(1)
-        return row
-
-    def _build_cooldown_section(self) -> QHBoxLayout:
-        """Temps de recharge (repris de TP_COOLDOWN_MS dans l'AHK d'origine,
-        voir pixel_watcher.py) : toujours actif, pas de toggle séparé — un
-        champ à 0 (ou vide) équivaut à aucun délai."""
         self.cooldown_seconds_input = QLineEdit()
         self.cooldown_seconds_input.setValidator(QDoubleValidator(0.0, 3600.0, 2, self))
         self.cooldown_seconds_input.setPlaceholderText("0.0")
@@ -278,9 +321,17 @@ class PixelMacroSlot(QWidget):
         self.cooldown_seconds_input.setFixedHeight(_FIELD_HEIGHT)
 
         row = QHBoxLayout()
-        row.addLayout(self._labeled_column(t("page.macro.pixel.cooldown_seconds_label"), self.cooldown_seconds_input))
+        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
+        row.addLayout(self._labeled_column(t("page.macro.pixel.reaction1_label"), self.key_capture))
+        row.addLayout(self._labeled_column(t("page.macro.pixel.reaction2_label"), self.swap_target_capture))
+        row.addLayout(self._labeled_column(t("page.macro.pixel.swap_key_label"), self.swap_key_capture))
+        row.addLayout(
+            self._labeled_column(t("page.macro.pixel.cooldown_seconds_label"), self.cooldown_seconds_input)
+        )
         row.addStretch(1)
-        return row
+        layout.addLayout(row)
+
+        return card
 
     def _build_control_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -305,11 +356,14 @@ class PixelMacroSlot(QWidget):
         # Petite marge à droite : sans ça, ces boutons touchent directement
         # le bord du viewport (donc la scrollbar) une fois la colonne gauche
         # contrainte à sa largeur exacte par la QScrollArea (voir
-        # MacroPage.__init__ dans page_macro.py). 35px (pas 14) : aligne en
-        # plus le bord droit de Réinitialiser avec celui du groupe des 3
-        # onglets "Macro type" tout en haut de la page (mesuré empiriquement,
-        # même correctif que macro_simple_tab.py).
-        row.addSpacing(35)
+        # MacroPage.__init__ dans page_macro.py). 21px (pas 35) : le layout
+        # parent (voir __init__) porte maintenant lui-même une marge droite
+        # de 14px (même raison, cartes "Détection"/"Réaction"), donc 21+14=35
+        # retombe exactement sur la même position mesurée empiriquement
+        # qu'avant — alignée avec le bord droit du groupe des 3 onglets
+        # "Macro type" tout en haut de la page (même correctif que
+        # macro_simple_tab.py).
+        row.addSpacing(21)
         return row
 
     # ------------------------------------------------------------------
@@ -581,6 +635,9 @@ class SlotChooserDialog(QDialog):
 
         self.list_widget = QListWidget()
         self.list_widget.setMinimumWidth(280)
+        # Espace entre le texte et la scrollbar — règle globale, voir
+        # CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.list_widget)
         for label, is_free in options:
             suffix = (
                 t("page.macro.pixel.slot_free_suffix") if is_free

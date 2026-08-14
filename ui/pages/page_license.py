@@ -193,6 +193,16 @@ class LicensePage(BasePage):
         self._worker = worker
         worker.start()
 
+    def shutdown(self) -> None:
+        """Arrêt INCONDITIONNEL et SYNCHRONE de la vérification réseau en
+        cours, si il y en a une — appelé juste avant que cette page soit
+        réellement détruite (voir MainWindow.reload_language), pas seulement
+        masquée. Sans ça, un changement de langue pendant la vérification de
+        licence au démarrage détruirait un QThread encore actif (Qt plante
+        avec un qFatal, jamais une exception Python catchable)."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.wait(2000)
+
     def _on_saved_check_finished(self, result) -> None:
         self.recheck_btn.setEnabled(True)
 

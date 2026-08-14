@@ -28,11 +28,11 @@ from features.custom_script.defender_scan import DefenderScanResult, scan_file
 from features.custom_script.heuristics import analyze_script
 from features.custom_script.process_manager import RunningScript, start_script, stop_script, write_companion_ahk_file
 from features.custom_script.script_store import (
-    CustomScriptEntry, ScriptAnalysis, delete_script, is_analysis_current, list_scripts, save_script,
+    CustomScriptEntry, ScriptAnalysis, delete_script, export_script, is_analysis_current, list_scripts, save_script,
 )
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
-from ui.scrollbar_style import style_scrollbar_directly
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.styled_message_box import show_confirm, show_high_risk_confirm, show_warning
 from ui.toggle_switch import ToggleSwitch
@@ -53,14 +53,6 @@ _SEVERITY_BADGE_COMPACT_KEYS = {
 
 _ROW_BADGE_WIDTH = 48
 _ROW_NAME_MAX_CHARS = 16  # marges/espacement resserrés (voir _ScriptRowWidget) : un peu plus de place pour le nom
-
-# Espace entre une scrollbar et le contenu qu'elle borde — même valeur
-# utilisée pour la scrollbar de la page (colonne éditeur défilante, voir
-# _build_editor_scroll_area) ET celle, interne, de l'éditeur de script
-# (voir _build_editor_column) : les deux doivent avoir un espacement
-# visuellement identique. Même principe que _TAB_SCROLLBAR_GAP dans
-# page_performance.py.
-_SCROLLBAR_GAP = 12
 
 # Même menu contextuel stylé que celui de la Bibliothèque de macros (voir
 # ui/pages/page_macro.py::_build_styled_menu) — copie locale volontaire,
@@ -231,7 +223,7 @@ class _ScriptAnalysisDialog(QDialog):
         layout.setSpacing(10)
 
         name_label = QLabel(entry.name)
-        name_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        name_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(name_label)
 
         badge_row = QHBoxLayout()
@@ -400,32 +392,34 @@ class CustomScriptPage(BasePage):
         # Fast Flags (recherche + "Ajouter un flag" + "Parcourir les flags",
         # voir page_fastflags.py::_build_editor_column) : le champ prend tout
         # l'espace disponible (stretch=1), les boutons suivent à droite, sans
-        # stretch final. height=34/font_pixel_size=13 sur les boutons pour
-        # matcher au pixel près la hauteur naturelle d'un QLineEdit sous ce
-        # thème (mesuré : QLineEdit ≈ 34px, QPushButton.secondaryButton ≈
-        # 35px) — sans ça, AnimatedButton retombe sur sa hauteur par défaut
-        # (42px), visiblement plus haute que le champ juste à côté.
+        # stretch final. Hauteur/padding laissés au défaut standard
+        # d'AnimatedButton (voir ui/animated_button.py, calé sur les boutons
+        # QSS du haut de Fast Flags), plus besoin de les fixer ici.
+        # font_pixel_size=13 reste explicite (matche la police du QLineEdit
+        # voisin, indépendant de la hauteur du bouton).
         top_row = QHBoxLayout()
         top_row.setSpacing(8)
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText(t("page.custom_script.name_placeholder"))
         top_row.addWidget(self.name_input, 1)
 
-        self.import_btn = AnimatedButton(
-            t("page.custom_script.import_btn"), variant="neutral", height=34, font_pixel_size=13,
-        )
+        self.import_btn = AnimatedButton(t("page.custom_script.import_btn"), variant="neutral", font_pixel_size=13)
         self.import_btn.clicked.connect(self._on_import_clicked)
         top_row.addWidget(self.import_btn)
 
-        self.new_btn = AnimatedButton(
-            t("page.custom_script.new_btn"), variant="neutral", height=34, font_pixel_size=13,
-        )
-        self.new_btn.clicked.connect(self._on_new_clicked)
-        top_row.addWidget(self.new_btn)
+        # "Exporter" (pas "Nouveau") : même comportement/logique que
+        # "Exporter" en bibliothèque Macro/Fast Flags — exporte l'élément
+        # actuellement SÉLECTIONNÉ dans la Bibliothèque (voir
+        # _on_export_clicked), pas le contenu de l'éditeur. "Nouveau" reste
+        # une méthode interne (_on_new_clicked, appelée par _on_delete_entry
+        # pour vider l'éditeur si le script supprimé y était chargé) mais n'a
+        # plus de bouton dédié.
+        self.export_btn = AnimatedButton(t("page.custom_script.export_btn"), variant="neutral", font_pixel_size=13)
+        self.export_btn.clicked.connect(self._on_export_clicked)
+        top_row.addWidget(self.export_btn)
         layout.addLayout(top_row)
 
         self.script_edit = QPlainTextEdit()
-        self.script_edit.setPlaceholderText(t("page.custom_script.editor_placeholder"))
         # Remplit tout l'espace vertical disponible (stretch=1 ci-dessous),
         # comme le tableau de la page Fast Flags entre son en-tête et ses
         # boutons du bas — plus de hauteur fixe : le résultat d'analyse vit
@@ -434,11 +428,8 @@ class CustomScriptPage(BasePage):
         # Sa propre scrollbar interne reste légitime pour un script dont le
         # texte dépasse l'espace visible (contrairement à l'ancienne
         # scrollbar de PAGE, retirée) — espace texte/scrollbar toujours
-        # réservé via setViewportMargins (un padding QSS classique se pose
-        # sur le cadre extérieur, pas entre le texte et la barre déjà collée
-        # au bord intérieur, voir QPlainTextEdit qui est lui-même un
-        # QAbstractScrollArea).
-        self.script_edit.setViewportMargins(0, 0, _SCROLLBAR_GAP, 0)
+        # réservé (règle globale, voir CLAUDE.md/ui/scrollbar_style.py).
+        apply_viewport_scrollbar_gap(self.script_edit)
         style_scrollbar_directly(self.script_edit.verticalScrollBar())
         layout.addWidget(self.script_edit, 1)
 
@@ -446,25 +437,19 @@ class CustomScriptPage(BasePage):
         # après) — dernière ligne de la colonne, donc en bas à droite de sa
         # zone. Le résultat d'analyse ne s'affiche plus ici : il vit dans
         # _ScriptAnalysisDialog, une fenêtre séparée (même principe que
-        # "Voir les logs"), ouverte automatiquement après Enregistrer/
-        # Réanalyser ou à la demande via "Voir l'analyse".
+        # "Voir les logs"), ouverte automatiquement après "Enregistrer" (voir
+        # _analyze_and_save) — plus de bouton "Analyser" séparé, l'analyse se
+        # déclenche déjà automatiquement à l'enregistrement.
         bottom_button_row = QHBoxLayout()
         bottom_button_row.setSpacing(10)
         bottom_button_row.addStretch(1)
-        # Toujours activés (contrairement à un premier essai qui les
+        # Toujours activé (contrairement à un premier essai qui le
         # désactivait tant qu'aucun script n'était chargé) : l'état
         # "disabled" d'AnimatedButton peint une bordure claire
         # (STATUS_NEUTRAL, #9BA1AB) au lieu du contour gris #33333C des
-        # autres boutons — visuellement incohérent juste à côté
-        # d'"Enregistrer". Chaque handler gère déjà le no-op si rien n'est
-        # chargé, donc rien à perdre à les laisser actifs en permanence.
-        # "Analyser" fusionne les anciens "Réanalyser"/"Voir l'analyse" :
-        # relance toujours l'analyse ET ouvre directement la fenêtre de
-        # résultat (même logique que l'ancien rescan_btn) — plus de bouton
-        # séparé pour simplement rouvrir un résultat déjà calculé.
-        self.analyze_btn = AnimatedButton(t("page.custom_script.analyze_btn"), variant="neutral")
-        self.analyze_btn.clicked.connect(self._on_analyze_clicked)
-        bottom_button_row.addWidget(self.analyze_btn)
+        # autres boutons — visuellement incohérent juste à côté des autres.
+        # Le handler gère déjà le no-op si rien n'est chargé, donc rien à
+        # perdre à le laisser actif en permanence.
         self.save_btn = AnimatedButton(t("page.custom_script.save_btn"), variant="neutral")
         self.save_btn.clicked.connect(self._on_save_clicked)
         bottom_button_row.addWidget(self.save_btn)
@@ -499,15 +484,9 @@ class CustomScriptPage(BasePage):
             return
         self._analyze_and_save(name, text)
 
-    def _on_analyze_clicked(self) -> None:
-        name = self.name_input.text().strip() or (self._current_entry.name if self._current_entry else "")
-        text = self.script_edit.toPlainText()
-        if not name or not text.strip():
-            show_warning(self, t("page.custom_script.title"), t("page.custom_script.save_empty_error"))
-            return
-        self._analyze_and_save(name, text)
-
     def _on_reset_clicked(self) -> None:
+        # Bouton "Réinitialiser" : vide juste le texte de l'éditeur, sans
+        # toucher au nom du script ni au script actuellement chargé.
         self.script_edit.clear()
 
     def _analyze_and_save(self, name: str, text: str) -> None:
@@ -605,7 +584,7 @@ class CustomScriptPage(BasePage):
         layout.setSpacing(6)
 
         title = QLabel(t("page.custom_script.library_title"))
-        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         self.library_list = QListWidget()
@@ -627,6 +606,9 @@ class CustomScriptPage(BasePage):
             "QListWidget::item:selected { background-color: transparent; }"
         )
         self.library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Espace entre le contenu (badge, interrupteur) et la scrollbar —
+        # règle globale, voir CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.library_list)
         self.library_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.library_list.customContextMenuRequested.connect(self._on_library_context_menu)
         # Cliquer une ligne (hors interrupteur, qui capte lui-même son clic)
@@ -690,6 +672,25 @@ class CustomScriptPage(BasePage):
         if self._current_path == path:
             self._on_new_clicked()
         self._refresh_library()
+
+    def _on_export_clicked(self) -> None:
+        """Exporte l'élément actuellement SÉLECTIONNÉ dans la Bibliothèque
+        (pas le contenu de l'éditeur) — même comportement que "Exporter" en
+        bibliothèque Macro/Fast Flags (voir page_macro.py::_on_export_clicked)."""
+        item = self.library_list.currentItem()
+        if item is None:
+            return
+        entry_id = item.data(Qt.ItemDataRole.UserRole)
+        result = self._entries.get(entry_id)
+        if result is None:
+            return
+        source_path, entry = result
+        dest_path, _ = QFileDialog.getSaveFileName(
+            self, t("page.custom_script.export_btn"), f"{entry.name}.zkscript", "Zenkai Script (*.zkscript)"
+        )
+        if not dest_path:
+            return
+        export_script(source_path, dest_path)
 
     # ------------------------------------------------------------------
     # ON/OFF — cœur de la logique de sécurité (voir CLAUDE.md /
@@ -761,3 +762,15 @@ class CustomScriptPage(BasePage):
         for entry_id, running in list(self._running.items()):
             stop_script(running)
             self._running.pop(entry_id, None)
+
+    def shutdown(self) -> None:
+        """Arrêt INCONDITIONNEL et SYNCHRONE de tout ce qui pourrait encore
+        tourner — appelé juste avant que cette page soit réellement détruite
+        (voir MainWindow.reload_language), pas seulement masquée. Un scan
+        Defender en cours (_defender_worker) est laissé finir (best-effort,
+        borné à 2s comme les autres arrêts synchrones de ce projet — jamais
+        interrompu de force, un scan antivirus tué au milieu n'a pas de
+        sens) plutôt que détruit en cours de route."""
+        self._stop_all_running_scripts()
+        if self._defender_worker is not None and self._defender_worker.isRunning():
+            self._defender_worker.wait(2000)

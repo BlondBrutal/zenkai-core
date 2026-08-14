@@ -151,6 +151,16 @@ def list_scripts() -> list[tuple[str, CustomScriptEntry]]:
     return results
 
 
+def export_script(source_path: str, dest_path: str) -> None:
+    """Copie brute du .zkscript vers dest_path — même principe que
+    features/macro_pixel/pixel_macro.py::export_macro (le fichier lui-même
+    EST déjà le format d'échange, pas besoin de le retraiter)."""
+    with open(source_path, "r", encoding="utf-8") as f:
+        data = f.read()
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(data)
+
+
 def delete_script(path: str) -> None:
     """Supprime le .zkscript ET son .ahk compagnon s'il existe — jamais
     d'exception si l'un des deux est déjà absent."""

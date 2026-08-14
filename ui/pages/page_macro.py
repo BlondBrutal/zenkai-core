@@ -30,7 +30,7 @@ from ui.info_badge import InfoBadge
 from ui.pages.base_page import BasePage
 from ui.pages.macro_pixel_tab import PixelMacroTab
 from ui.pages.macro_simple_tab import MacroSimpleTab
-from ui.scrollbar_style import style_scrollbar_directly
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, scrollarea_gap_qss, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 from ui.toggle_switch import ToggleSwitch
 
@@ -47,6 +47,7 @@ _TAB_ACTIVE_COLOR = STATUS_OK
 _TAB_INACTIVE_COLOR = "#C7CBD3"
 _TAB_SUBTITLE_ACTIVE = "#7DE4CF"
 _TAB_SUBTITLE_INACTIVE = STATUS_NEUTRAL
+
 _HIGHLIGHT_STYLE = (
     "QFrame#segmentHighlight {"
     f" background-color: rgba(23, 184, 151, 40); border: 1px solid rgba(23, 184, 151, 115);"
@@ -152,7 +153,9 @@ class _SegmentButton(QFrame):
     def set_active(self, active: bool) -> None:
         title_color = _TAB_ACTIVE_COLOR if active else _TAB_INACTIVE_COLOR
         subtitle_color = _TAB_SUBTITLE_ACTIVE if active else _TAB_SUBTITLE_INACTIVE
-        self.title_label.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {title_color}; border: none;")
+        self.title_label.setStyleSheet(
+            f"font-size: 15px; font-weight: 700; color: {title_color}; border: none; padding-bottom: 3px;"
+        )
         self.subtitle_label.setStyleSheet(f"font-size: 11.5px; color: {subtitle_color}; border: none;")
 
 
@@ -330,7 +333,12 @@ class MacroPage(BasePage):
         # QScrollArea peint sa propre viewport avec la couleur de palette Qt
         # par défaut tant qu'on ne la force pas transparente (même limitation
         # que pour les résultats de diagnostic sur la page Performance).
-        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        # padding-right : espace entre le contenu (cartes, etc.) et la
+        # scrollbar — règle globale, voir CLAUDE.md/ui/scrollbar_style.py.
+        scroll_area.setStyleSheet(
+            "QScrollArea { background: transparent; border: none;"
+            f" {scrollarea_gap_qss()} }}"
+        )
         scroll_area.setWidget(container)
         scroll_area.viewport().setStyleSheet("background: transparent;")
         # RoundedScrollBarStyle (le QProxyStyle global) ne s'applique pas de
@@ -373,6 +381,17 @@ class MacroPage(BasePage):
             self.pixel_tab.stop_if_running()
             self.simple_tab.stop_if_running()
 
+    def shutdown(self) -> None:
+        """Arrêt INCONDITIONNEL et SYNCHRONE de toute macro active (Pixel ou
+        Simple), quel que soit l'état du coupe-circuit — appelé juste avant
+        que cette page soit réellement détruite (voir
+        MainWindow.reload_language), pas seulement masquée. Les watchers/
+        lecteurs de macro tournent par conception indépendamment de la
+        visibilité de la page (voir macro_pixel_tab.py/macro_simple_tab.py),
+        donc rien ne les arrête automatiquement à un simple hide()."""
+        self.pixel_tab.stop_if_running()
+        self.simple_tab.stop_if_running()
+
     # ------------------------------------------------------------------
     def _build_placeholder(self) -> QWidget:
         # Le texte descriptif de ce type de macro est déjà donné par le badge
@@ -402,7 +421,7 @@ class MacroPage(BasePage):
         layout.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         title = QLabel(t("page.macro.library_title"))
-        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         layout.addSpacing(4)
@@ -438,6 +457,9 @@ class MacroPage(BasePage):
         # _on_library_context_menu), comme dans le tableau Macro Simple.
         self.library_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.library_list.customContextMenuRequested.connect(self._on_library_context_menu)
+        # Espace entre le texte et la scrollbar — règle globale, voir
+        # CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.library_list)
         layout.addWidget(self.library_list, 1)
 
         # Toujours visible : désactivé (grisé) plutôt que masqué quand rien

@@ -80,7 +80,7 @@ class MouseCoordsOverlay(QWidget):
         layout.addLayout(header)
 
         self._coords_label = QLabel("X: 0    Y: 0")
-        self._coords_label.setStyleSheet("color: #E7E9EE; font-size: 15px; font-weight: 700;")
+        self._coords_label.setStyleSheet("color: #E7E9EE; font-size: 15px; font-weight: 700; padding-bottom: 3px;")
         layout.addWidget(self._coords_label)
 
         hint = QLabel(t("page.macro.simple.coords_overlay_hint"))

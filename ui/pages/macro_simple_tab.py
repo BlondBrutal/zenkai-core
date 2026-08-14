@@ -1,22 +1,23 @@
 """
 Onglet "Macro type 1" (Simple) de la page Macro : jusqu'à MAX_SLOTS
-emplacements indépendants (MacroSimpleSlot), chacun avec sa propre séquence enregistrée
-d'actions clavier/souris (features/macro_simple/recorder.py), sa touche de
-déclenchement globale (features/macro_simple/hotkey_listener.py) et son
-propre thread de rejeu (features/macro_simple/player.py).
+emplacements indépendants (MacroSimpleSlot), chacun avec sa propre séquence
+d'actions clavier/souris construite manuellement étape par étape dans le
+tableau (voir ui/action_capture_widget.py — pas d'enregistrement en temps
+réel des appuis, fonctionnalité retirée), sa touche de déclenchement globale
+(features/macro_simple/hotkey_listener.py) et son propre thread de rejeu
+(features/macro_simple/player.py).
 
 Contrairement à Macro Pixel (qui reprend un comportement déjà présent dans
-"Global Macro v2.ahk"), il n'existe pas de moteur d'enregistrement/rejeu
-générique à porter depuis l'AHK d'origine — ce fichier ne contient que des
-séquences figées et un déclencheur pixel, déjà couverts ailleurs. Le
-fonctionnement ci-dessous (modes Hold/Toggle/Répétition, tableau d'étapes
-éditable) est donc conçu depuis zéro, mais reprend le même pattern "jusqu'à
-3 emplacements" que macro_pixel_tab.py.
+"Global Macro v2.ahk"), il n'existe pas de moteur de rejeu générique à
+porter depuis l'AHK d'origine — ce fichier ne contient que des séquences
+figées et un déclencheur pixel, déjà couverts ailleurs. Le fonctionnement
+ci-dessous (modes Hold/Toggle/Répétition, tableau d'étapes éditable) est
+donc conçu depuis zéro, mais reprend le même pattern "jusqu'à 3 emplacements"
+que macro_pixel_tab.py.
 
-Distinction de vocabulaire volontaire : "Enregistrer" démarre/arrête la
-CAPTURE d'une séquence (touches/clics), alors que "Sauvegarder" persiste la
-config de l'emplacement (comme "Enregistrer" dans Macro Pixel) dans la
-Bibliothèque — même mécanisme, nom différent pour ne pas les confondre.
+"Sauvegarder" persiste la config de l'emplacement (comme "Enregistrer" dans
+Macro Pixel) dans la Bibliothèque — nom différent pour ne pas la confondre
+avec la construction de la séquence elle-même dans le tableau.
 
 Modes de déclenchement ("Activer", touche de déclenchement globale écoutée
 même hors focus via HotkeyTriggerListener) :
@@ -45,11 +46,11 @@ from features.macro_simple.macro_simple import (
     TRIGGER_HOLD, TRIGGER_REPEAT, TRIGGER_TOGGLE, save_macro_simple,
 )
 from features.macro_simple.player import MacroPlayerThread
-from features.macro_simple.recorder import MacroRecorder
 from ui.action_capture_widget import ActionCaptureWidget
 from ui.animated_button import AnimatedButton
 from ui.key_capture_widget import KeyCaptureWidget
 from ui.mouse_coords_overlay import MouseCoordsOverlay
+from ui.scrollbar_style import apply_viewport_scrollbar_gap
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 from ui.styled_dropdown import StyledDropdown
 from ui.toggle_switch import ToggleSwitch
@@ -68,7 +69,14 @@ _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # élident maintenant proprement (voir _refresh_text dans les deux classes)
 # plutôt que de couper le texte n'importe où.
 _HOTKEY_FIELD_WIDTH = 112
-_MODE_FIELD_WIDTH = 112
+# La consigne d'origine (+35%, 112 -> 151) tronquait toujours "Tant que
+# maintenu  ▾" (le plus long des 3 libellés) : largeur de texte + flèche
+# mesurée par rendu RÉEL (police neutralButton) à 128px, + 36px de padding
+# horizontal (voir StyledDropdown._TEXT_HORIZONTAL_PADDING) = 164px
+# nécessaires. 170px (marge de sécurité confortable, même principe que les
+# autres largeurs de ce fichier) — seul ce champ est élargi, les 3 autres de
+# cette ligne restent à leur largeur standard.
+_MODE_FIELD_WIDTH = 170
 _REPEAT_FIELD_WIDTH = 70
 _LOOP_DELAY_FIELD_WIDTH = 90
 
@@ -205,7 +213,10 @@ def _labeled_column(label_text: str, widget: QWidget) -> QWidget:
 
 class MacroSimpleSlot(QWidget):
     """Un emplacement de macro Simple indépendant : sa propre séquence, sa
-    propre touche de déclenchement, son propre enregistreur/lecteur/écouteur."""
+    propre touche de déclenchement, son propre lecteur/écouteur (la séquence
+    elle-même se construit manuellement étape par étape dans le tableau, pas
+    par un enregistrement en temps réel des appuis — voir _add_step_row/
+    ui/action_capture_widget.py)."""
 
     macro_saved = pyqtSignal()
     delete_requested = pyqtSignal(object)  # émet self
@@ -213,7 +224,6 @@ class MacroSimpleSlot(QWidget):
     def __init__(self, deletable: bool, parent=None):
         super().__init__(parent)
         self._deletable = deletable
-        self._recorder: MacroRecorder | None = None
         self._hotkey_listener: HotkeyTriggerListener | None = None
         self._player: MacroPlayerThread | None = None
         self._armed_config: MacroSimpleConfig | None = None
@@ -223,25 +233,25 @@ class MacroSimpleSlot(QWidget):
         QApplication.instance().aboutToQuit.connect(self._stop_all)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Marge droite (0 -> 14) : sans elle, les cartes "Activation"/
+        # "Séquence" (qui remplissent toute la largeur de ce layout, voir
+        # ci-dessous) touchaient quasiment la scrollbar de la page (voir
+        # MacroPage._build_tab_scroll_area) — la marge de la QScrollArea
+        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. _build_control_row
+        # compense cette marge (35 -> 21, soit -14) pour garder Réinitialiser
+        # aligné avec le groupe d'onglets "Macro type" au-dessus (mesure déjà
+        # empirique, voir son commentaire) — même correctif que
+        # macro_pixel_tab.py.
+        layout.setContentsMargins(0, 0, 14, 0)
         layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         control_row = self._build_control_row()
 
         layout.addLayout(self._build_header_row())
         layout.addLayout(self._build_name_row())
-        layout.addLayout(self._build_hotkey_mode_row())
-        layout.addLayout(self._build_record_test_row())
-
-        # Marge à droite : sans ça, le tableau touche directement le bord du
-        # viewport (donc la scrollbar de la page) une fois la colonne gauche
-        # contrainte à sa largeur exacte par la QScrollArea (voir
-        # MacroPage.__init__ dans page_macro.py) — même correctif déjà
-        # appliqué à control_row ci-dessous et dans macro_pixel_tab.py.
-        table_row = QHBoxLayout()
-        table_row.addWidget(self._build_table_container())
-        table_row.addStretch(1)
-        layout.addLayout(table_row)
+        layout.addWidget(self._build_activation_card())
+        self.table = self._build_table()
+        layout.addWidget(self.table)
 
         self.validation_label = QLabel("")
         self.validation_label.setWordWrap(True)
@@ -259,7 +269,7 @@ class MacroSimpleSlot(QWidget):
         row.setSpacing(6)  # -10% (2e passe : 8 -> 7 -> 6)
 
         self.slot_title_label = QLabel()
-        self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        self.slot_title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         row.addWidget(self.slot_title_label)
 
         if self._deletable:
@@ -280,11 +290,63 @@ class MacroSimpleSlot(QWidget):
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText(t("page.macro.simple.name_label"))
         # Largeur fixe (identique à macro_pixel_tab.py) : sans ça, ce champ
-        # seul dans sa ligne s'étire sur toute la largeur disponible.
+        # seul dans sa ligne s'étire sur toute la largeur disponible. Hauteur
+        # fixe (_FIELD_HEIGHT) : sans ça, la hauteur naturelle d'un QLineEdit
+        # (calculée par Qt à partir du padding/police QSS) ne correspond pas
+        # forcément EXACTEMENT à celle imposée ci-dessous à view_coords_btn.
         self.name_input.setFixedWidth(240)
+        self.name_input.setFixedHeight(_FIELD_HEIGHT)
         row.addWidget(self.name_input)
+
+        # "Voir les coordonnées" vit maintenant sur cette ligne (déplacé
+        # depuis la carte "Séquence", voir _build_sequence_card) : plus de
+        # ligne de boutons séparée au-dessus du tableau depuis le retrait de
+        # "Enregistrer" (fonction d'enregistrement des appuis en temps réel
+        # retirée, voir _on_view_coords_clicked pour ce qui reste). Même
+        # hauteur que le champ "Nom de la macro" voisin (_FIELD_HEIGHT),
+        # passée explicitement à AnimatedButton (dont la hauteur par défaut,
+        # 40px, ne correspondrait pas).
+        self.view_coords_btn = AnimatedButton(
+            t("page.macro.simple.view_coords_btn"), variant="neutral", height=_FIELD_HEIGHT,
+        )
+        self.view_coords_btn.clicked.connect(self._on_view_coords_clicked)
+        row.addWidget(self.view_coords_btn)
+
         row.addStretch(1)
         return row
+
+    @staticmethod
+    def _build_card(title_text: str) -> tuple[QFrame, QVBoxLayout]:
+        """Carte "Activation" : même helper que
+        macro_pixel_tab.py::PixelMacroSlot._build_card (copie locale
+        volontaire, cohérente avec la convention déjà en place dans ce
+        projet de légère duplication plutôt que de factoriser prématurément
+        entre les deux onglets) — même style QFrame.card (fond #1F1F25,
+        bordure #2A2A32, rayon 14px, voir theme.qss) et même padding : haut/
+        bas -40% (24 -> 14) puis -15% supplémentaire (14 -> 12) par rapport à
+        _CursorSection (ui/pages/page_cursor.py), la référence d'origine du
+        style de carte ; gauche -30% (24 -> 17) ; droite inchangée (24).
+        "Séquence" n'utilise PLUS ce helper (voir _build_sequence_card) :
+        depuis le retrait de son cadre/titre, le tableau des étapes occupe
+        lui-même directement tout l'espace, sans carte englobante."""
+        card = QFrame()
+        card.setProperty("class", "card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(17, 12, 24, 12)
+        layout.setSpacing(14)
+
+        title = QLabel(title_text)
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
+        layout.addWidget(title)
+
+        return card, layout
+
+    def _build_activation_card(self) -> QFrame:
+        """Carte "Activation" : Activer/Mode/Répétitions (ou Délai répét.
+        selon le mode, voir _on_mode_changed) sur une même ligne."""
+        card, layout = self._build_card(t("page.macro.simple.activation_card_title"))
+        layout.addLayout(self._build_hotkey_mode_row())
+        return card
 
     def _build_hotkey_mode_row(self) -> QHBoxLayout:
         # exclude_click_buttons=True : touche de DÉCLENCHEMENT (démarre/arrête
@@ -329,10 +391,12 @@ class MacroSimpleSlot(QWidget):
         # d'Enregistrer/Voir les coordonnées (qui utilise setSpacing()
         # partout, sans addSpacing() séparé).
         row.setSpacing(0)
-        row.addWidget(_labeled_column(t("page.macro.simple.hotkey_label"), self.hotkey_capture))
-        row.addSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
+        # Ordre : Mode, puis Activer, puis Répétitions/Délai répét. (inversé
+        # par rapport à Activer/Mode d'origine).
         row.addWidget(_labeled_column(t("page.macro.simple.mode_label"), self.mode_combo))
-        # Même écart qu'entre Activer et Mode ci-dessus (uniforme sur toute
+        row.addSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
+        row.addWidget(_labeled_column(t("page.macro.simple.hotkey_label"), self.hotkey_capture))
+        # Même écart qu'entre Mode et Activer ci-dessus (uniforme sur toute
         # la ligne).
         row.addSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
         row.addWidget(self.repeat_field)
@@ -347,20 +411,6 @@ class MacroSimpleSlot(QWidget):
         mode, _ = _MODE_OPTIONS[index]
         self.repeat_field.setVisible(mode == TRIGGER_REPEAT)
         self.loop_delay_field.setVisible(mode in (TRIGGER_HOLD, TRIGGER_TOGGLE))
-
-    def _build_record_test_row(self) -> QHBoxLayout:
-        self.record_btn = AnimatedButton(t("page.macro.simple.record_btn"), variant="neutral")
-        self.record_btn.clicked.connect(self._on_record_clicked)
-
-        self.view_coords_btn = AnimatedButton(t("page.macro.simple.view_coords_btn"), variant="neutral")
-        self.view_coords_btn.clicked.connect(self._on_view_coords_clicked)
-
-        row = QHBoxLayout()
-        row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
-        row.addWidget(self.record_btn)
-        row.addWidget(self.view_coords_btn)
-        row.addStretch(1)
-        return row
 
     def _on_view_coords_clicked(self) -> None:
         if self._coords_overlay is not None:
@@ -377,6 +427,12 @@ class MacroSimpleSlot(QWidget):
 
     def _build_table(self) -> QTableWidget:
         table = _StepsTable(0, 6)
+        # objectName dédié : cible QTableWidget#stepsTable en QSS (voir
+        # theme.qss) sans affecter les autres QTableWidget de l'app (ex: page
+        # Fast Flags) — cette table porte directement sa propre bordure/rayon
+        # depuis le retrait du QFrame.tableCard qui l'entourait (double
+        # bordure carte + cadre de tableau, voir _build_sequence_card).
+        table.setObjectName("stepsTable")
         table.setHorizontalHeaderLabels([
             t("page.macro.simple.col_action"),
             t("page.macro.simple.col_current_pos"),
@@ -424,15 +480,15 @@ class MacroSimpleSlot(QWidget):
         # donc vérifiées par capture d'écran RÉELLE (pas juste sizeHint) sur
         # leur pire cas ("-10000"/"600000"/"XButton2"/"printscreen"), avec une
         # marge de sécurité confortable.
-        # Le cadre du tableau (QFrame.tableCard, voir _build_table_container)
-        # doit tenir dans les mêmes 453px que le reste de la page (voir
-        # _build_green_separator(453) dans macro_pixel_tab.py, la largeur de
-        # référence du panneau) : la colonne "Position actuelle" a été ajoutée
-        # SANS élargir le cadre, en resserrant les autres colonnes plutôt
-        # (padding QSpinBox/QHeaderView réduit ci-dessous, voir
-        # QSpinBox.tableCellSpin et QHeaderView::section dans theme.qss) —
-        # élargir le cadre à 505px avait fait déborder le tableau hors du
-        # panneau visible (la colonne Délai se retrouvait coupée à droite).
+        # Largeurs de colonnes resserrées (padding QSpinBox/QHeaderView
+        # réduit, voir QSpinBox.tableCellSpin et QHeaderView::section dans
+        # theme.qss) : la dernière colonne (Délai) absorbe tout l'espace
+        # restant via setStretchLastSection ci-dessous. Le tableau occupe
+        # maintenant lui-même tout le rectangle (plus de carte englobante ni
+        # de padding, voir __init__/theme.qss::QTableWidget#stepsTable), donc
+        # ces 5 premières colonnes tiennent confortablement à leur largeur
+        # d'origine, vérifiées par rendu pixel réel sur leur pire cas
+        # ("-10000"/"600000"/"XButton2"/"printscreen").
         table.setColumnWidth(COL_ACTION, 103)
         table.setColumnWidth(COL_CURRENT_POS, 62)
         table.setColumnWidth(COL_X, 68)
@@ -455,35 +511,6 @@ class MacroSimpleSlot(QWidget):
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._on_table_context_menu)
         return table
-
-    def _build_table_container(self) -> QFrame:
-        """Le cadre arrondi vit ici, PAS sur le QTableWidget lui-même : voir
-        le commentaire sur QFrame.tableCard dans theme.qss.
-
-        Marge à 0 sur les côtés et en haut : la bande d'en-tête (QHeaderView)
-        va jusqu'aux bords gauche/droit/haut du cadre SANS marge résiduelle,
-        et ses DEUX coins hauts ont eux-mêmes un rayon assorti à celui du
-        cadre (QHeaderView::section:first/:last dans theme.qss) — ils
-        épousent donc directement la courbe du cadre au lieu d'y peindre un
-        coin carré par-dessus. Seule une marge en bas (8px, ≥ le
-        border-radius) reste nécessaire : le corps du tableau (QTableWidget,
-        carré) n'a lui pas de coins arrondis assortis, donc son coin bas
-        doit rester en retrait du coin arrondi du cadre pour ne pas répéter
-        le même problème que l'en-tête en haut."""
-        container = QFrame()
-        container.setProperty("class", "tableCard")
-        # Largeur fixe (453px, la même largeur de panneau que le reste de la
-        # page — voir _build_table pour pourquoi ce n'est plus 505) : sans
-        # ça, ce cadre s'étire pour remplir tout l'espace restant de sa ligne
-        # et déborde à droite par rapport à Enregistrer/Réinitialiser et au
-        # trait vert (tous deux alignés sur cette même largeur, voir
-        # _build_control_row et __init__ ci-dessus).
-        container.setFixedWidth(453)
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 8)
-        self.table = self._build_table()
-        layout.addWidget(self.table)
-        return container
 
     def _on_table_context_menu(self, pos) -> None:
         """Clic droit sur une ligne : "Ajouter une étape" (à la fin si le
@@ -558,10 +585,12 @@ class MacroSimpleSlot(QWidget):
         self.reset_btn = AnimatedButton(t("page.macro.simple.reset_btn"), variant="neutral")
         self.reset_btn.clicked.connect(self._on_reset_clicked)
         row.addWidget(self.reset_btn)
-        # 35px (pas juste les 14px de marge scrollbar) : aligne le bord droit
-        # de Réinitialiser avec celui du groupe des 3 onglets "Macro type"
-        # tout en haut de la page (mesuré empiriquement).
-        row.addSpacing(35)
+        # 21px (pas 35) : le layout parent (voir __init__) porte maintenant
+        # lui-même une marge droite de 14px (cartes "Activation"/"Séquence"),
+        # donc 21+14=35 retombe exactement sur la même position mesurée
+        # empiriquement qu'avant — alignée avec le bord droit du groupe des 3
+        # onglets "Macro type" tout en haut de la page.
+        row.addSpacing(21)
         return row
 
     # ------------------------------------------------------------------
@@ -785,51 +814,6 @@ class MacroSimpleSlot(QWidget):
             self._add_step_row(step)
 
     # ------------------------------------------------------------------
-    # Enregistrement de la séquence (capture globale clavier/souris)
-    # ------------------------------------------------------------------
-    def _on_record_clicked(self) -> None:
-        if self._recorder is not None:
-            self._stop_recording()
-        else:
-            self._start_recording()
-
-    def _start_recording(self) -> None:
-        # Vide le tableau AVANT de commencer : l'enregistrement remplace
-        # toujours la séquence actuellement affichée (comme avant), sauf que
-        # les nouvelles lignes arrivent maintenant une par une au fur et à
-        # mesure plutôt que toutes d'un coup à l'arrêt (voir
-        # _on_step_recorded/_on_step_delay_updated).
-        self._populate_table([])
-
-        window = self.window()
-        exclude_rect = window.frameGeometry() if window is not None else None
-        self._recorder = MacroRecorder(exclude_rect=exclude_rect, parent=self)
-        self._recorder.stopped_by_escape.connect(self._stop_recording)
-        self._recorder.step_recorded.connect(self._on_step_recorded)
-        self._recorder.step_delay_updated.connect(self._on_step_delay_updated)
-        self._recorder.start()
-
-        self.record_btn.setText(t("page.macro.simple.stop_record_btn"))
-
-    def _on_step_recorded(self, step: MacroStep) -> None:
-        self._add_step_row(step)
-
-    def _on_step_delay_updated(self, index: int, delay_ms: int) -> None:
-        # Le délai d'une étape n'est connu qu'une fois l'action SUIVANTE
-        # commencée (voir recorder.py) : la ligne apparaît donc d'abord avec
-        # "0", puis se corrige toute seule dès que la prochaine action démarre.
-        delay_spin = self._cell_widget(index, COL_DELAY)
-        if delay_spin is not None:
-            delay_spin.setValue(delay_ms)
-
-    def _stop_recording(self) -> None:
-        if self._recorder is None:
-            return
-        self._recorder.stop()
-        self._recorder = None
-        self.record_btn.setText(t("page.macro.simple.record_btn"))
-
-    # ------------------------------------------------------------------
     # Construction / validation de la config
     # ------------------------------------------------------------------
     def is_empty(self) -> bool:
@@ -931,10 +915,7 @@ class MacroSimpleSlot(QWidget):
 
     def _stop_all(self) -> None:
         """Appelé à la fermeture de l'application : coupe tout ce qui
-        pourrait encore tourner (enregistrement, écoute, rejeu)."""
-        if self._recorder is not None:
-            self._recorder.stop()
-            self._recorder = None
+        pourrait encore tourner (écoute des captures de cellule, rejeu)."""
         self._cancel_all_row_listeners()
         self._stop_listener()
 
@@ -1085,6 +1066,9 @@ class SimpleSlotChooserDialog(QDialog):
 
         self.list_widget = QListWidget()
         self.list_widget.setMinimumWidth(280)
+        # Espace entre le texte et la scrollbar — règle globale, voir
+        # CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.list_widget)
         for label, is_free in options:
             suffix = (
                 t("page.macro.simple.slot_free_suffix") if is_free
@@ -1163,10 +1147,10 @@ class MacroSimpleTab(QWidget):
         self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
-        # Longueur alignée sur la largeur du cadre du tableau (453px, voir
-        # _build_table_container) plutôt que de continuer sur toute la
-        # largeur — aligné à gauche pour ne pas être centré/étiré par le
-        # layout.
+        # Longueur alignée sur celle du groupe des 3 onglets "Macro type" tout
+        # en haut de la page (453px, mesurée empiriquement — voir
+        # _build_control_row) plutôt que de continuer sur toute la largeur —
+        # aligné à gauche pour ne pas être centré/étiré par le layout.
         layout.addWidget(_build_green_separator(453), 0, Qt.AlignmentFlag.AlignLeft)
 
         self.add_slot_btn = AnimatedButton(t("page.macro.simple.add_slot_btn"), variant="neutral")

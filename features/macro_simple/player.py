@@ -7,7 +7,7 @@ time.sleep() unique bloquant sur toute la durée d'une étape.
 
 Envoie les touches/clics via `pydirectinput`, seule bibliothèque du projet
 utilisée pour ENVOYER des entrées (pynput ne sert qu'à en RECEVOIR, voir
-hotkey_listener.py/recorder.py).
+hotkey_listener.py/ui/action_capture_widget.py).
 """
 import logging
 import time

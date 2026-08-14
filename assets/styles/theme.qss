@@ -66,10 +66,17 @@ QWidget#contentArea {
     background-color: #1A1A1F;
 }
 
+/* padding-bottom : sans lui, le bas des lettres descendantes ("j", "g", "y"...)
+   peut être tronqué par la hauteur calculée du QLabel (constaté par capture
+   d'écran réelle sur un titre de carte à la police/graisse similaire — même
+   correctif que sur tous les titres en gras 14/15px de l'app, voir
+   ui/pages/*.py) — appliqué ici aussi par précaution/cohérence, même si
+   aucun titre de page actuel ne contient de descendante. */
 QLabel.pageTitle {
     font-size: 22px;
     font-weight: 700;
     color: #E7E9EE;
+    padding-bottom: 4px;
 }
 
 QLabel.pageSubtitle {
@@ -259,16 +266,6 @@ QSpinBox.tableCellSpin {
 }
 
 /* --- Tableau (séquence d'étapes, Macro Simple) --- */
-/* Le cadre arrondi vit sur QFrame.tableCard (le conteneur autour de la
-   table, voir macro_simple_tab.py), PAS sur QTableWidget lui-même : le
-   QHeaderView peint son propre coin carré par-dessus, exactement là où le
-   coin de la table devrait s'arrondir, donnant un rendu "coupé" au coin
-   supérieur gauche (chevauchement header/coin arrondi, un classique Qt avec
-   QAbstractScrollArea). En reportant l'arrondi sur un cadre englobant avec
-   une petite marge intérieure (le tableau reste carré à l'intérieur), le
-   coin carré de l'en-tête ne coïncide plus jamais avec le coin arrondi du
-   cadre — les deux couleurs de fond étant identiques, la fine marge entre
-   les deux est invisible. */
 QTableWidget {
     background-color: #202027;
     border: none;
@@ -277,8 +274,15 @@ QTableWidget {
     outline: none;
 }
 
-QFrame.tableCard {
-    background-color: #202027;
+/* Bordure/rayon portés directement par le tableau des étapes (objectName
+   dédié, voir macro_simple_tab.py::_build_table) — plus de QFrame.tableCard
+   séparé qui l'entourait (double bordure une fois empilé dans la carte
+   "Séquence", voir QFrame.card ci-dessous). Fonctionne SANS le chevauchement
+   "coin coupé" habituel entre QHeaderView et un border-radius de
+   QAbstractScrollArea (voir historique/CLAUDE.md) car QHeaderView::section:
+   first/:last ci-dessous portent déjà exactement le même rayon (8px) — les
+   deux coins hauts s'alignent donc parfaitement au lieu de se chevaucher. */
+QTableWidget#stepsTable {
     border: 1px solid #33333C;
     border-radius: 8px;
 }
@@ -326,10 +330,10 @@ QHeaderView::section {
     font-weight: 700;
 }
 
-/* La bande d'en-tête va jusqu'aux bords du cadre englobant sans marge (voir
-   _build_table_container dans macro_simple_tab.py) : ses deux coins hauts
-   doivent donc porter eux-mêmes un rayon assorti à QFrame.tableCard (8px),
-   sinon leur coin carré déborderait de la courbe du cadre. */
+/* La bande d'en-tête va jusqu'aux bords du tableau sans marge : ses deux
+   coins hauts doivent donc porter eux-mêmes un rayon assorti à celui du
+   tableau (QTableWidget#stepsTable ci-dessus, 8px), sinon leur coin carré
+   déborderait de la courbe de la bordure. */
 QHeaderView::section:first {
     border-top-left-radius: 8px;
 }

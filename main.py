@@ -4,6 +4,7 @@ Affiche un splash screen pendant l'initialisation, puis la fenêtre principale.
 """
 import os
 import sys
+import traceback
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon, QPalette, QColor
@@ -59,58 +60,94 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("Zenkai Core")
-    # Le style natif Windows n'honore pas toujours le QSS : Fusion respecte
-    # fidèlement toute la feuille de style. RoundedScrollBarStyle l'enrobe
-    # pour peindre les scrollbars nous-mêmes (voir ui/scrollbar_style.py).
-    from ui.scrollbar_style import RoundedScrollBarStyle
 
-    app.setStyle(RoundedScrollBarStyle(QStyleFactory.create("Fusion")))
+    # Filet de sécurité permanent autour de toute l'initialisation : cause
+    # réelle d'un plantage totalement silencieux déjà rencontré ici (splash
+    # affiché puis retour direct au terminal, sans la moindre trace, ni
+    # stdout ni stderr) — voir ui/button_cursor.py, `Qt.CursorShape.
+    # ArrowShape` (une valeur qui n'existe pas) levait un AttributeError à
+    # chaque construction de bouton ; une exception Python levée DANS un
+    # eventFilter appelé depuis le C++ de Qt n'est PAS catchable par un
+    # try/except classique, PyQt6 abandonne directement le process (abort
+    # natif, aucune trace nulle part) — corrigé à la racine (ArrowCursor).
+    # Ce bloc reste posé en permanence : il ne peut rien contre un futur
+    # abort natif du même genre, mais capture au moins toute exception
+    # Python RÉELLEMENT catchable pendant l'init (bien plus probable
+    # qu'un nouveau bug de cette famille précise) au lieu de la laisser
+    # remonter jusqu'à un crash silencieux du même type.
+    try:
+        # Le style natif Windows n'honore pas toujours le QSS : Fusion
+        # respecte fidèlement toute la feuille de style. RoundedScrollBarStyle
+        # l'enrobe pour peindre les scrollbars nous-mêmes (voir
+        # ui/scrollbar_style.py).
+        from ui.scrollbar_style import RoundedScrollBarStyle
 
-    # QPalette.Highlight/HighlightedText (pas seulement le QSS) : ce sont ces
-    # rôles que Qt utilise comme couche de FOND pour toute sélection (texte
-    # ET lignes de tableau) avant même d'appliquer nos règles QSS par-dessus.
-    # Nos règles comme "QTableWidget::item:selected { background-color:
-    # rgba(23, 184, 151, 40); ... }" sont volontairement semi-transparentes
-    # (léger lavis turquoise) — sans ce correctif, elles se superposaient au
-    # bleu système par défaut de la palette au lieu d'un fond neutre, ce qui
-    # donnait un bleu-turquoise mêlé au lieu du turquoise pur (vérifié par
-    # échantillonnage de pixels : le bleu restait dominant sous le lavis à
-    # faible opacité). Posé sur la palette de l'app entière (pas juste sur le
-    # tableau) : Highlight/HighlightedText gouvernent la sélection dans tous
-    # les widgets standards (champs de texte, listes, tableaux, etc.), et rien
-    # dans ce thème ne doit jamais afficher le bleu de sélection Qt par défaut.
-    palette = app.palette()
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#17B897"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#0E1C19"))
-    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor("#17B897"))
-    palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor("#0E1C19"))
-    app.setPalette(palette)
+        app.setStyle(RoundedScrollBarStyle(QStyleFactory.create("Fusion")))
 
-    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo", "logo.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
+        # Curseur "main pointée" garanti sur tous les boutons de l'app
+        # (popups comprises), y compris ceux créés bien après ce point —
+        # voir ui/button_cursor.py pour pourquoi un filtre d'évènements
+        # central est le seul moyen fiable de couvrir ça (Qt Style Sheets ne
+        # supporte pas de propriété "cursor").
+        from ui.button_cursor import install_button_cursor_polish
 
-    theme_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "styles", "theme.qss")
-    if os.path.exists(theme_path):
-        with open(theme_path, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
+        install_button_cursor_polish(app)
 
-    # Import différé (après QApplication) car certains widgets ont besoin
-    # d'un contexte Qt déjà initialisé.
-    from ui.splash import build_splash
-    from ui.main_window import MainWindow
+        # QPalette.Highlight/HighlightedText (pas seulement le QSS) : ce sont
+        # ces rôles que Qt utilise comme couche de FOND pour toute sélection
+        # (texte ET lignes de tableau) avant même d'appliquer nos règles QSS
+        # par-dessus. Nos règles comme "QTableWidget::item:selected {
+        # background-color: rgba(23, 184, 151, 40); ... }" sont
+        # volontairement semi-transparentes (léger lavis turquoise) — sans ce
+        # correctif, elles se superposaient au bleu système par défaut de la
+        # palette au lieu d'un fond neutre, ce qui donnait un bleu-turquoise
+        # mêlé au lieu du turquoise pur (vérifié par échantillonnage de
+        # pixels : le bleu restait dominant sous le lavis à faible opacité).
+        # Posé sur la palette de l'app entière (pas juste sur le tableau) :
+        # Highlight/HighlightedText gouvernent la sélection dans tous les
+        # widgets standards (champs de texte, listes, tableaux, etc.), et
+        # rien dans ce thème ne doit jamais afficher le bleu de sélection Qt
+        # par défaut.
+        palette = app.palette()
+        palette.setColor(QPalette.ColorRole.Highlight, QColor("#17B897"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#0E1C19"))
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Highlight, QColor("#17B897"))
+        palette.setColor(QPalette.ColorGroup.Inactive, QPalette.ColorRole.HighlightedText, QColor("#0E1C19"))
+        app.setPalette(palette)
 
-    splash = build_splash()
-    splash.show()
-    app.processEvents()
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "logo", "logo.ico")
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
 
-    window = MainWindow()
+        theme_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "styles", "theme.qss")
+        if os.path.exists(theme_path):
+            with open(theme_path, "r", encoding="utf-8") as f:
+                app.setStyleSheet(f.read())
 
-    def _show_main_window():
-        window.show()
-        splash.finish(window)
+        # Import différé (après QApplication) car certains widgets ont besoin
+        # d'un contexte Qt déjà initialisé.
+        from ui.splash import build_splash
+        from ui.main_window import MainWindow
 
-    QTimer.singleShot(900, _show_main_window)
+        splash = build_splash()
+        splash.show()
+        app.processEvents()
+
+        window = MainWindow()
+
+        def _show_main_window():
+            window.show()
+            splash.finish(window)
+
+        QTimer.singleShot(900, _show_main_window)
+    except Exception:
+        traceback.print_exc()
+        try:
+            import logging
+            logging.getLogger("zenkaiontop").exception("Échec fatal pendant l'initialisation de l'app")
+        except Exception:
+            pass
+        return 1
 
     return app.exec()
 

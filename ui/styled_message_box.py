@@ -8,7 +8,7 @@ ce projet.
 """
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from core.i18n import t
 from ui.status_colors import STATUS_CRITICAL, STATUS_OK, STATUS_WARNING
@@ -68,7 +68,7 @@ class StyledMessageBox(QDialog):
         header_row.setSpacing(10)
         header_row.addWidget(_StatusIcon(QColor(accent), glyph))
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {accent};")
+        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {accent}; padding-bottom: 3px;")
         header_row.addWidget(title_label)
         header_row.addStretch(1)
         layout.addLayout(header_row)
@@ -122,7 +122,7 @@ class _ConfirmDialog(QDialog):
         header_row.setSpacing(10)
         header_row.addWidget(_StatusIcon(QColor(STATUS_WARNING), "!"))
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {STATUS_WARNING};")
+        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {STATUS_WARNING}; padding-bottom: 3px;")
         header_row.addWidget(title_label)
         header_row.addStretch(1)
         layout.addLayout(header_row)
@@ -215,8 +215,14 @@ class _CheckBoxRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
+        # AlignVCenter (pas AlignTop) : le texte de cette ligne tient
+        # toujours sur une seule ligne (voir dialog.high_risk_ack_checkbox),
+        # donc centrer verticalement la case sur la hauteur du QLabel
+        # l'aligne réellement sur SA ligne de texte — AlignTop la calait sur
+        # le haut du layout, au-dessus du centre optique du texte (vérifié
+        # par capture d'écran réelle).
         self._indicator = _CheckIndicator()
-        layout.addWidget(self._indicator, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._indicator, 0, Qt.AlignmentFlag.AlignVCenter)
 
         label = QLabel(text)
         label.setWordWrap(True)
@@ -258,7 +264,7 @@ class _HighRiskConfirmDialog(QDialog):
         header_row.setSpacing(10)
         header_row.addWidget(_StatusIcon(QColor(STATUS_CRITICAL), "!"))
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {STATUS_CRITICAL};")
+        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {STATUS_CRITICAL}; padding-bottom: 3px;")
         header_row.addWidget(title_label)
         header_row.addStretch(1)
         layout.addLayout(header_row)
@@ -313,3 +319,86 @@ def show_high_risk_confirm(parent, title: str, text: str, confirm_label: str, ca
         title, text, confirm_label, cancel_label or t("dialog.cancel_btn"), parent=parent,
     )
     return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+class _TextPromptDialog(QDialog):
+    """Demande une simple saisie texte (ex: nom d'un preset Fast Flags à
+    enregistrer) — remplace QInputDialog.getText(), une boîte de dialogue Qt
+    générique (fond blanc, boutons non stylés) qui détonnait complètement
+    avec le reste de l'app. Même famille que _ConfirmDialog/
+    _HighRiskConfirmDialog ci-dessus (fond sombre explicite, icône peinte à
+    la main, boutons "secondaryButton") — PAS de fenêtre sans bordure : comme
+    tous les autres QDialog custom de ce fichier, la barre de titre reste
+    celle, native, de l'OS (elle hérite déjà de l'icône ZK posée sur
+    QApplication dans main.py, voir app.setWindowIcon), seul le CONTENU est
+    stylé."""
+
+    def __init__(self, title: str, label_text: str, placeholder: str, confirm_label: str, cancel_label: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(380)
+        self.setStyleSheet(f"background-color: {_BACKGROUND};")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+        header_row.addWidget(_StatusIcon(QColor(STATUS_OK), "i"))
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {STATUS_OK}; padding-bottom: 3px;")
+        header_row.addWidget(title_label)
+        header_row.addStretch(1)
+        layout.addLayout(header_row)
+
+        label = QLabel(label_text)
+        label.setWordWrap(True)
+        label.setStyleSheet("font-size: 12.5px; color: #E7E9EE;")
+        layout.addWidget(label)
+
+        self.input = QLineEdit()
+        self.input.setPlaceholderText(placeholder)
+        self.input.textChanged.connect(self._update_confirm_enabled)
+        layout.addWidget(self.input)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_btn = QPushButton(cancel_label)
+        cancel_btn.setProperty("class", "secondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
+
+        self.confirm_btn = QPushButton(confirm_label)
+        self.confirm_btn.setProperty("class", "secondaryButton")
+        self.confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.confirm_btn.setEnabled(False)
+        self.confirm_btn.clicked.connect(self.accept)
+        button_row.addWidget(self.confirm_btn)
+        layout.addLayout(button_row)
+
+        self.input.setFocus()
+
+    def _update_confirm_enabled(self, text: str) -> None:
+        self.confirm_btn.setEnabled(bool(text.strip()))
+
+    def text(self) -> str:
+        return self.input.text().strip()
+
+
+def show_text_prompt(
+    parent, title: str, label_text: str, confirm_label: str,
+    placeholder: str = "", cancel_label: str | None = None,
+) -> str | None:
+    """Affiche une popup de saisie texte stylée et attend la réponse
+    (modal). Renvoie le texte saisi (déjà .strip()) si "Confirmer" a été
+    cliqué, None si la fenêtre a été fermée ou "Annuler" cliqué — jamais une
+    chaîne vide (le bouton de confirmation reste désactivé tant que le champ
+    est vide)."""
+    dialog = _TextPromptDialog(
+        title, label_text, placeholder, confirm_label, cancel_label or t("dialog.cancel_btn"), parent=parent,
+    )
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+    return dialog.text()

@@ -36,7 +36,7 @@ from PyQt6.QtCore import QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemView, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QStackedWidget, QStyle, QStyledItemDelegate,
     QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -45,6 +45,7 @@ from core.config import config
 from core.i18n import t
 from core.paths import get_fastflags_active_config_path
 from features.fastflags import launcher, protocol
+from features.fastflags.roblox_control import kill_roblox
 from features.fastflags.manager import (
     PRESETS, delete_custom_preset, detect_active_preset, detect_value_type,
     export_flags_file, get_known_flags, import_flags_file, list_custom_presets,
@@ -52,9 +53,9 @@ from features.fastflags.manager import (
 )
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
-from ui.scrollbar_style import style_scrollbar_directly
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
-from ui.styled_message_box import show_confirm, show_info, show_warning
+from ui.styled_message_box import show_confirm, show_info, show_text_prompt, show_warning
 from ui.toggle_switch import ToggleSwitch
 
 _PRESET_NAME_KEYS = {
@@ -128,36 +129,16 @@ _VALUE_COL_WIDTH = 118
 _TYPE_COL_WIDTH = 70
 _DELETE_COL_WIDTH = 46
 
-# Boutons Appliquer/Enregistrer/Réinitialiser : même hauteur ET même taille
-# de police que les boutons du haut de page ("Ajouter un flag"/"Parcourir les
-# flags", de simples QPushButton.secondaryButton — voir theme.qss : police à
-# "font-size: 13px" + "font-weight: 600"). AnimatedButton peint son texte en
-# 10pt par défaut (~13.3px à 96 DPI seulement — un écart fractionnaire qui
+# Boutons Lancer Roblox/Enregistrer/Réinitialiser : hauteur et padding
+# horizontal laissés au défaut standard d'AnimatedButton (voir
+# ui/animated_button.py — même taille que partout ailleurs dans l'app,
+# volontairement, pour rester cohérent avec les autres pages), seule la
+# taille de police reste forcée ici. AnimatedButton peint son texte en 10pt
+# par défaut (~13.3px à 96 DPI seulement — un écart fractionnaire qui
 # grandit sous une mise à l'échelle DPI non standard) : _ACTION_BTN_FONT_SIZE
-# force un vrai pixel size de 13, identique au QSS.
-#
-# _ACTION_BTN_HEIGHT = 40, PAS 35 : 35px avait été mesuré via un test HORS-ÉCRAN
-# (QT_QPA_PLATFORM=offscreen), qui substitue une police sans rapport avec
-# "Segoe UI Variable Text" (indisponible dans cet environnement) — ses
-# métriques de ligne diffèrent de la vraie police Windows, donc la hauteur
-# EN PRATIQUE des boutons du haut (calculée par Qt à partir du padding QSS +
-# la hauteur de ligne réelle de la police) n'est PAS 35px mais 40px. Vérifié
-# par une VRAIE capture d'écran Windows (pas hors-écran) : add_row_btn.height()
-# == 40 en conditions réelles. Toute comparaison de taille entre ces boutons
-# doit désormais passer par une capture réelle, pas seulement un test
-# hors-écran (qui peut sembler "correct" tout en étant faux à l'usage).
-#
-# Largeur : padding horizontal aligné sur .secondaryButton (theme.qss,
-# "padding: 10px 18px" -> 18+18 = 36px de marge totale autour du texte) —
-# le texte semblait serré contre les bords avec l'ancienne valeur (30px, un
-# peu moins généreuse). "Appliquer" étant maintenant seul à gauche pendant
-# qu'"Enregistrer"/"Réinitialiser" sont groupés à droite (voir le stretch
-# dans _build_editor_column), l'ancienne contrainte "les 3 boutons doivent
-# tenir sans compression sur ~498px de large" ne s'applique plus tels
-# quels : chaque groupe n'a plus qu'à tenir dans SA MOITIÉ de la ligne, pas
-# la largeur totale.
-_ACTION_BTN_HEIGHT = 40
-_ACTION_BTN_PADDING = 36
+# force un vrai pixel size de 13, identique à la police QSS des boutons du
+# haut de page ("Ajouter un flag"/"Parcourir les flags",
+# QPushButton.secondaryButton, "font-size: 13px" dans theme.qss).
 _ACTION_BTN_FONT_SIZE = 13
 # Même écart que celui entre "Ajouter un flag"/"Parcourir les flags" (voir
 # top_row.setSpacing(8) dans _build_editor_column) : les 3 boutons du bas
@@ -255,6 +236,17 @@ QTableWidget#fastFlagsTable QLineEdit {{
     border: none;
     selection-background-color: {_APP_BACKGROUND};
     selection-color: {STATUS_OK};
+    /* padding: sans cette valeur explicite, cet éditeur hérite du padding
+       généreux du QLineEdit générique de l'app (8px 10px, voir plus haut
+       dans ce fichier QSS) — pensé pour un champ autonome à hauteur libre,
+       pas pour tenir dans la hauteur de ligne FIXE de ce tableau (mesurée à
+       21px pour l'éditeur une fois ouvert : 8px de padding en haut et en
+       bas ne laissait plus que 5px pour le texte lui-même, le tronquant
+       verticalement à moitié — vérifié par rendu réel). 2px vertical laisse
+       une marge confortable au texte sur cette hauteur ; 8px horizontal
+       inchangé (aligné sur le padding de QTableWidget#fastFlagsTable::item
+       ci-dessus). */
+    padding: 2px 8px;
 }}
 """
 
@@ -491,6 +483,9 @@ class _KnownFlagsDialog(QDialog):
 
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # Espace entre le texte et la scrollbar — règle globale, voir
+        # CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.list_widget)
         layout.addWidget(self.list_widget, 1)
 
         button_row = QHBoxLayout()
@@ -786,6 +781,9 @@ class FastFlagsPage(BasePage):
         self.table.setColumnWidth(COL_VALUE, _VALUE_COL_WIDTH)
         self.table.setColumnWidth(COL_TYPE, _TYPE_COL_WIDTH)
         self.table.setColumnWidth(COL_DELETE, _DELETE_COL_WIDTH)
+        # Espace entre la dernière colonne (Supprimer) et la scrollbar —
+        # règle globale, voir CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.table)
         self.table.itemChanged.connect(self._on_item_changed)
         table_frame_layout.addWidget(self.table)
         layout.addWidget(table_frame, 1)
@@ -812,23 +810,26 @@ class FastFlagsPage(BasePage):
         action_row.setSpacing(_ACTION_GAP)
         action_row.addStretch(1)
         self.launch_btn = AnimatedButton(
-            t("page.fastflags.launch_btn"), variant="neutral",
-            height=_ACTION_BTN_HEIGHT, horizontal_padding=_ACTION_BTN_PADDING,
-            font_pixel_size=_ACTION_BTN_FONT_SIZE,
+            t("page.fastflags.launch_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
         )
         self.launch_btn.clicked.connect(self._on_launch_clicked)
         action_row.addWidget(self.launch_btn)
+        # "Kill Roblox" : termine instantanément le process s'il tourne déjà
+        # (voir features/fastflags/roblox_control.py) — entre "Lancer
+        # Roblox" et "Enregistrer" (pas après), pour rester à côté de
+        # l'action à laquelle il se rapporte le plus directement.
+        self.kill_btn = AnimatedButton(
+            t("page.fastflags.kill_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
+        )
+        self.kill_btn.clicked.connect(self._on_kill_clicked)
+        action_row.addWidget(self.kill_btn)
         self.save_preset_btn = AnimatedButton(
-            t("page.fastflags.save_preset_btn"), variant="neutral",
-            height=_ACTION_BTN_HEIGHT, horizontal_padding=_ACTION_BTN_PADDING,
-            font_pixel_size=_ACTION_BTN_FONT_SIZE,
+            t("page.fastflags.save_preset_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
         )
         self.save_preset_btn.clicked.connect(self._on_save_preset)
         action_row.addWidget(self.save_preset_btn)
         self.reset_btn = AnimatedButton(
-            t("page.fastflags.reset_btn"), variant="neutral",
-            height=_ACTION_BTN_HEIGHT, horizontal_padding=_ACTION_BTN_PADDING,
-            font_pixel_size=_ACTION_BTN_FONT_SIZE,
+            t("page.fastflags.reset_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
         )
         self.reset_btn.clicked.connect(self._on_reset)
         action_row.addWidget(self.reset_btn)
@@ -964,7 +965,7 @@ class FastFlagsPage(BasePage):
         layout.setSpacing(6)
 
         title = QLabel(t("page.fastflags.library_title"))
-        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         layout.addSpacing(4)
@@ -1009,6 +1010,9 @@ class FastFlagsPage(BasePage):
         # tableau Macro Simple.
         self.library_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.library_list.customContextMenuRequested.connect(self._on_library_context_menu)
+        # Espace entre le texte et la scrollbar — règle globale, voir
+        # CLAUDE.md/ui/scrollbar_style.py.
+        apply_viewport_scrollbar_gap(self.library_list)
 
         self.library_stack = QStackedWidget()
         self.library_stack.addWidget(self.library_empty_label)
@@ -1124,10 +1128,11 @@ class FastFlagsPage(BasePage):
         self._refresh_library()
 
     def _on_save_preset(self) -> None:
-        name, ok = QInputDialog.getText(
-            self, t("page.fastflags.save_preset_prompt_title"), t("page.fastflags.save_preset_prompt_label")
+        name = show_text_prompt(
+            self, t("page.fastflags.save_preset_prompt_title"), t("page.fastflags.save_preset_prompt_label"),
+            t("dialog.ok_btn"),
         )
-        if not ok or not name.strip():
+        if not name:
             return
         path = save_custom_preset(name.strip(), self._collect_flags_from_table())
         if path is None:
@@ -1168,6 +1173,12 @@ class FastFlagsPage(BasePage):
             show_warning(self, t("page.fastflags.title"), t("page.fastflags.launch_injection_failed_warning"))
         else:
             show_info(self, t("page.fastflags.title"), t("page.fastflags.launch_success"))
+
+    def _on_kill_clicked(self) -> None:
+        if kill_roblox():
+            show_info(self, t("page.fastflags.title"), t("page.fastflags.kill_success"))
+        else:
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.kill_not_running"))
 
     def _on_reset(self) -> None:
         if reset_to_default():

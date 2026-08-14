@@ -139,17 +139,69 @@ class MainWindow(QMainWindow):
         le processus : chaque page ne traduit son texte qu'à sa construction
         (t() appelé une fois), donc on les reconstruit à neuf plutôt que de
         retraduire chaque widget un par un (ce qui demanderait un mécanisme
-        de retranslate() dédié sur absolument tout, bien plus lourd)."""
+        de retranslate() dédié sur absolument tout, bien plus lourd).
+
+        Cause réelle d'un plantage systématique ici, diagnostiquée via une
+        trace (logger.exception temporaire + traceback.print_stack() dans
+        PerformancePage._start_live_thread) : QStackedWidget.removeWidget()
+        sur le widget COURANT fait automatiquement basculer currentIndex()
+        sur le widget suivant, ce qui déclenche un vrai showEvent sur lui —
+        dans cette boucle, "license" (courant au départ) est retiré en
+        premier, ce qui promeut PerformancePage (2e page ajoutée) comme
+        nouveau widget courant et déclenche SON showEvent, qui démarre
+        LiveMonitorThread (le monitoring en direct est activé par défaut,
+        voir config "performance_live_monitoring_enabled" dans
+        page_performance.py). Ce thread frais tourne encore quand
+        PerformancePage elle-même est ensuite hide()/removeWidget()/
+        deleteLater() plus loin dans la MÊME boucle — hideEvent ne l'arrête
+        PAS (volontaire : il doit continuer pendant qu'on quitte la page
+        pour aller jouer, voir _stop_live_thread_if_unneeded) — et Qt
+        plante avec un qFatal("QThread: Destroyed while thread is still
+        running") dès que la suppression différée du widget est traitée :
+        aucune exception Python, juste un arrêt natif immédiat du process
+        (Qt6Core.dll, confirmé via le journal d'erreurs applicatives
+        Windows), ce qui explique pourquoi l'app semblait "se fermer" sans
+        aucune trace exploitable.
+
+        Double correctif :
+        1. Un widget PLACEHOLDER jetable devient le widget "courant" avant
+           la boucle (setCurrentIndex(-1) ne suffit PAS : vérifié, Qt
+           re-promeut quand même un widget "courant" dès le premier
+           removeWidget() qui suit, -1 n'étant pas traité comme "aucun
+           widget" par QStackedWidget contrairement à QStackedLayout) :
+           aucune des anciennes pages n'est donc plus jamais "courante"
+           pendant leur suppression, donc plus aucune promotion implicite ni
+           showEvent parasite entre elles.
+        2. shutdown() (si la page le définit) appelé avant hide(), pour
+           arrêter de façon SYNCHRONE et INCONDITIONNELLE tout thread/timer
+           qui — par conception — pourrait survivre à un simple hide() (ex:
+           monitoring/overlay Performance, licence en cours de vérification,
+           macros actives) : la reconstruction détruit réellement ces pages,
+           contrairement à une simple navigation, où les laisser tourner
+           est le comportement voulu."""
         current_key = next((k for k, i in self._page_index.items() if i == self.stack.currentIndex()), "license")
 
+        # Voir point 1 ci-dessus.
+        placeholder = QWidget()
+        self.stack.addWidget(placeholder)
+        self.stack.setCurrentWidget(placeholder)
+
         for widget in list(self.pages.values()):
-            # hide() déclenche hideEvent (ex: PerformancePage y arrête son
-            # thread de monitoring en direct) avant la destruction.
+            # Voir point 2 ci-dessus.
+            shutdown = getattr(widget, "shutdown", None)
+            if shutdown is not None:
+                shutdown()
+            # hide() déclenche hideEvent (best-effort pour tout ce qui n'a
+            # pas besoin d'un arrêt inconditionnel, voir shutdown()
+            # ci-dessus) avant la destruction.
             widget.hide()
             self.stack.removeWidget(widget)
             widget.deleteLater()
         self.pages.clear()
         self._page_index.clear()
+
+        self.stack.removeWidget(placeholder)
+        placeholder.deleteLater()
 
         self.setWindowTitle(t("app_name"))
         self.sidebar.retranslate()

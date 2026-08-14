@@ -27,6 +27,7 @@ from core.paths import get_logs_dir
 from core.security_log import read_events
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
+from ui.scrollbar_style import apply_viewport_scrollbar_gap
 from ui.segmented_toggle import SegmentedToggle
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL
 from ui.styled_message_box import show_info, show_warning
@@ -162,6 +163,7 @@ _ACTION_LABEL_KEYS = {
     "fix_game_dvr": "page.settings.security_log_action.fix_game_dvr",
     "fix_sysmain": "page.settings.security_log_action.fix_sysmain",
     "roblox_launch": "page.settings.security_log_action.roblox_launch",
+    "roblox_kill": "page.settings.security_log_action.roblox_kill",
     "presentmon_launch": "page.settings.security_log_action.presentmon_launch",
     "custom_script_launch": "page.settings.security_log_action.custom_script_launch",
     "custom_script_stop": "page.settings.security_log_action.custom_script_stop",
@@ -204,7 +206,16 @@ class _LogRowWidget(QWidget):
         style = f"color: {color};"
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
+        # Marge droite = 4 (marge normale) + CONTENT_SCROLLBAR_GAP (12) :
+        # apply_viewport_scrollbar_gap (voir _SecurityLogDialog) réserve déjà
+        # cet espace via setViewportMargins, mais cette ligne — contrairement
+        # aux autres listes Bibliothèque de l'app, toutes posées dans une
+        # carte avec sa propre marge — est le SEUL élément entre le bord du
+        # QDialog et la scrollbar ; la porter aussi ici, directement sur le
+        # widget de ligne, garantit l'espace même si le seul retrait du
+        # viewport ne suffisait pas (vérifié par capture d'écran réelle : le
+        # texte "Résultat" touchait toujours la scrollbar sans ce correctif).
+        layout.setContentsMargins(4, 2, 4 + 12, 2)
         layout.setSpacing(10)
 
         ts_label = QLabel(timestamp_text)
@@ -289,6 +300,9 @@ class _SecurityLogDialog(QDialog):
             # jamais revoir une barre pleine largeur oubliée au-dessus des
             # boutons.
             list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            # Espace entre le texte et la scrollbar verticale — règle
+            # globale, voir CLAUDE.md/ui/scrollbar_style.py.
+            apply_viewport_scrollbar_gap(list_widget)
             # Aucun changement visuel au survol/à la sélection — le statut
             # se lit uniquement à la couleur du texte de chaque ligne
             # (jamais d'aplat de fond), même surcharge locale que la
@@ -412,7 +426,7 @@ class SettingsPage(BasePage):
         layout.setSpacing(8)
 
         title = QLabel(t("page.settings.section_general"))
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         row = QHBoxLayout()
@@ -463,7 +477,7 @@ class SettingsPage(BasePage):
         layout.setSpacing(8)
 
         title = QLabel(t("page.settings.section_security"))
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         row = QHBoxLayout()

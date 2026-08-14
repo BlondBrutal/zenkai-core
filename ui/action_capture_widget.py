@@ -7,7 +7,7 @@ Contrairement à KeyCaptureWidget (clavier uniquement, capture locale via
 grabKeyboard — l'app doit juste avoir le focus), ce widget doit aussi
 détecter un clic de souris n'importe où à l'écran (pour en capturer aussi
 les coordonnées X/Y) : capture donc globalement via pynput (clavier +
-souris), comme features/macro_simple/recorder.py, plutôt que localement.
+souris), plutôt que localement.
 
 Un très court délai après le début de l'écoute ignore les clics (voir
 _IGNORE_CLICKS_AFTER_START_S) : filet de sécurité pour ne jamais se capturer

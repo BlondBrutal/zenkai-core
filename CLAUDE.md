@@ -49,6 +49,52 @@ seulement la bordure visible. Si un autre tableau de l'app affiche le
 même symptôme, appliquer directement ce fix plutôt que de repartir de
 zéro sur le diagnostic.
 
+## Bug récurrent connu : plantage silencieux au changement de langue (reload_language)
+
+Symptôme : l'app se ferme sans se rouvrir, aucune exception Python,
+aucune trace dans les logs applicatifs — ressemble à un vrai
+redémarrage raté, mais `reload_language()` (`ui/main_window.py`) ne
+relance jamais le process, seulement l'UI.
+
+Cause identifiée : `QStackedWidget.removeWidget()` appelé sur le
+widget COURANT fait automatiquement basculer `currentIndex()` sur le
+widget suivant — ce qui déclenche un vrai `showEvent()` sur lui, même
+en pleine boucle de démontage où on ne voulait RIEN afficher. Si une
+page suivante démarre un thread depuis `showEvent()` (ex:
+`PerformancePage`/`LiveMonitorThread`, monitoring en direct activé par
+défaut), ce thread frais tourne encore quand CETTE MÊME page est
+elle-même détruite un peu plus loin dans la boucle — `hideEvent()` ne
+l'arrête pas forcément (certains threads survivent volontairement à un
+simple hide(), ex: overlay Performance qui doit continuer pendant
+qu'on va jouer). Qt plante alors avec un `qFatal("QThread: Destroyed
+while thread is still running")` dès que la suppression différée du
+widget est traitée : un abort natif (Qt6Core.dll, confirmé via le
+journal d'erreurs applicatives Windows, code `0xc0000409`), jamais une
+exception Python catchable — un simple `try/except` autour du code de
+reconstruction ne voit donc jamais rien.
+
+Piège vérifié : `stack.setCurrentIndex(-1)` NE suffit PAS à empêcher
+cette promotion — contrairement à `QStackedLayout`, `QStackedWidget` ne
+traite pas `-1` comme "aucun widget courant" et re-promeut quand même
+un widget dès le `removeWidget()` suivant.
+
+Fix (voir `MainWindow.reload_language()`) :
+1. Un widget `QWidget()` PLACEHOLDER jetable devient le widget courant
+   (`setCurrentWidget`) avant toute suppression, et seulement retiré
+   une fois toutes les anciennes pages parties — aucune vraie page ne
+   redevient donc jamais "courante" pendant le démontage, donc plus
+   aucun `showEvent` parasite.
+2. Toute page qui possède un thread/timer qui peut légitimement
+   survivre à un `hide()` (par conception, comme le monitoring
+   Performance) doit définir une méthode `shutdown()` qui l'arrête de
+   façon INCONDITIONNELLE et SYNCHRONE (`.stop()` + `.wait(2000)`,
+   jamais un simple `.terminate()`) — `MainWindow` l'appelle sur
+   chaque ancienne page juste avant `hide()`/`deleteLater()`, en plus
+   (jamais à la place) du nettoyage habituel de `hideEvent`. Si une
+   nouvelle page a un thread/timer démarré depuis `showEvent()` ou
+   qu'un state persiste volontairement après `hide()`, lui ajouter ce
+   même `shutdown()` plutôt que de repartir de zéro sur le diagnostic.
+
 ## Architecture : Custom Script / interpréteur AutoHotkey
 
 La page Custom Script (`ui/pages/page_custom_script.py`,
@@ -134,10 +180,10 @@ sous-titres 13px, corps 12-13px, en-têtes de tableau 11px/700.
   tableau : `6px`. Cartes principales : `14px`. Cartes secondaires
   (navTabButton, listes, champs, combobox) : `8px`. Scrollbars : `5px`
   (moitié de leur largeur/hauteur — toujours arrondi complet).
-- Le rayon d'un cadre englobant (`QFrame.tableCard`, header inclus) doit
-  être répété sur CHAQUE couche empilée à cet endroit (voir bug des coins
-  ci-dessus) — jamais un seul `border-radius` isolé en espérant qu'il
-  s'applique en cascade.
+- Le rayon d'un cadre englobant (ex : `QTableWidget#stepsTable` avec son
+  `QHeaderView` intégré, voir `theme.qss`) doit être répété sur CHAQUE
+  couche empilée à cet endroit (voir bug des coins ci-dessus) — jamais un
+  seul `border-radius` isolé en espérant qu'il s'applique en cascade.
 - Padding bouton standard : `10px 18px`. Bouton compact en cellule :
   `2px 4px` / `4px 18px` selon la hauteur fixe du champ.
 
@@ -171,6 +217,33 @@ aux marges internes du widget de ligne (`QHBoxLayout.setContentsMargins`)
 24px), ce padding en trop peut le faire paraître coupé/mal centré ; repasser
 aussi `QListWidget::item { padding: 0px; }` dans la même surcharge locale
 et laisser les marges du widget de ligne être la seule source de padding.
+
+**Scrollbars — espace entre le contenu et la barre** : tout contenu
+défilable (carte, tableau, éditeur, liste) avec une scrollbar VISIBLE doit
+réserver un espace de `12px` entre son propre bord droit et la barre —
+jamais un contenu collé directement contre elle. Règle centralisée dans
+`ui/scrollbar_style.py` (`CONTENT_SCROLLBAR_GAP`, jamais une valeur en dur
+recopiée page par page) :
+- `QScrollArea` "nue" (conteneur de page/onglet) : utiliser
+  `scrollarea_gap_qss()` dans son propre `setStyleSheet("QScrollArea { ...
+  " + scrollarea_gap_qss() + " }")`. **Jamais** un `margin` QSS posé sur la
+  `QScrollBar` elle-même — vérifié sans aucun effet (ni horizontal ni
+  vertical) — c'est la `QScrollArea` qu'il faut rogner via `padding`,
+  viewport ET scrollbar se déplaçant ensemble.
+- Tout widget à scrollbar INTERNE (`QListWidget`, `QTableWidget`,
+  `QPlainTextEdit`... — tous des `QAbstractScrollArea`) : appeler
+  `apply_viewport_scrollbar_gap(widget)` juste après sa création, qui pose
+  `setViewportMargins(0, 0, 12, 0)` — l'API Qt native pour ça sur ces
+  widgets, déjà vérifiée par capture d'écran réelle.
+- Ne pas appliquer cette règle à un widget dont la scrollbar verticale est
+  volontairement masquée (`setVerticalScrollBarPolicy(ScrollBarAlwaysOff)`,
+  ex: le tableau d'étapes de Macro Simple, dont le défilement molette reste
+  possible sans barre visible) : rien à détacher, l'ajout serait un no-op
+  qui grignoterait inutilement la largeur de contenu déjà mesurée au pixel
+  près.
+- Toute nouvelle page avec un contenu défilable doit appliquer cette règle
+  dès sa conception, pas seulement quand quelqu'un remarque que le contenu
+  touche la barre.
 
 Quand une nouvelle préférence visuelle récurrente émerge en cours de
 projet (ex: comportement de clic, style d'un nouveau type de composant),

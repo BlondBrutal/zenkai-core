@@ -1,7 +1,8 @@
 """
 Config d'une macro Simple (Partie 1.4 du brief, "Macro type 1") : une
-séquence d'actions clavier/souris enregistrée par l'utilisateur (voir
-features/macro_simple/recorder.py), rejouée via une touche de déclenchement
+séquence d'actions clavier/souris construite manuellement étape par étape
+par l'utilisateur (voir ui/action_capture_widget.py et
+ui/pages/macro_simple_tab.py), rejouée via une touche de déclenchement
 globale (features/macro_simple/hotkey_listener.py + player.py) selon un mode :
 - Hold ("tant que maintenu") : boucle tant que la touche reste enfoncée.
 - Toggle ("ON/OFF") : un appui lance en boucle, un second appui arrête.

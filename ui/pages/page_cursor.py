@@ -1,8 +1,10 @@
 """
-Page "Curseur" : personnalise le curseur Windows (système) et le curseur en
+Page "Curseur" : personnalise le curseur Windows (système), le curseur en
 jeu (overlay Roblox à canal alpha réel, voir features/cursor/roblox_overlay.py)
-à partir d'une image fournie par l'utilisateur — repris de la page CURSOR de
-"Global Macro v2.ahk" (features/cursor/cursor_manager.py).
+et le crosshair (overlay fixe au centre de l'écran, voir
+features/cursor/crosshair_overlay.py) à partir d'une image fournie par
+l'utilisateur — repris de la page CURSOR de "Global Macro v2.ahk"
+(features/cursor/cursor_manager.py).
 """
 import os
 
@@ -20,8 +22,9 @@ _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.ico *.cur)"
 
 
 class _CursorSection(QFrame):
-    """Une section (Windows ou Roblox) : image actuelle, Importer/Réinitialiser,
-    taille — repris de la structure des sections GENERAL/ROBLOX de l'AHK."""
+    """Une section (Windows, Roblox ou Crosshair) : image actuelle,
+    Importer/Réinitialiser, taille — repris de la structure des sections
+    GENERAL/ROBLOX de l'AHK, réutilisée telle quelle pour le Crosshair."""
 
     def __init__(self, title: str, on_import, on_reset, on_size_changed, parent=None):
         super().__init__(parent)
@@ -31,11 +34,16 @@ class _CursorSection(QFrame):
         self._on_size_changed = on_size_changed
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
+        # Padding réduit (haut/bas 24 -> 16, côtés 24 -> 18) par rapport à la
+        # valeur d'origine de cette carte (encore utilisée telle quelle par
+        # d'autres cartes de l'app, ex. macro_pixel_tab.py/
+        # macro_simple_tab.py::_build_card, qui restent à 24/14 — cette
+        # réduction est spécifique à la page Curseur).
+        layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(14)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE;")
+        title_label.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title_label)
 
         current_row = QHBoxLayout()
@@ -59,6 +67,14 @@ class _CursorSection(QFrame):
         btn_row.addWidget(self.reset_btn)
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
+
+        # Espace additionnel, EN PLUS du spacing() général de layout (14px) :
+        # sans lui, la ligne de boutons ("Importer une image"/"Réinitialiser")
+        # et le label "Taille" juste en dessous paraissaient encore
+        # collés/trop proches malgré ce spacing général (vérifié par capture
+        # d'écran réelle : 8px de marge en plus ne suffisait pas, ni même
+        # 16px — portée à 28px).
+        layout.addSpacing(28)
 
         size_header = QHBoxLayout()
         size_label = QLabel(t("page.cursor.size_label"))
@@ -111,7 +127,9 @@ class CursorPage(BasePage):
         self.content_layout().setContentsMargins(margins.left(), margins.top(), 16, margins.bottom())
 
         body = QVBoxLayout()
-        body.setSpacing(16)
+        # -35% (16 -> 10) : écart vertical entre les 3 blocs (Curseur
+        # Windows/Curseur en jeu/Crosshair).
+        body.setSpacing(10)
 
         self.general_section = _CursorSection(
             t("page.cursor.section_general"),
@@ -125,10 +143,11 @@ class CursorPage(BasePage):
         )
         body.addWidget(self.roblox_section)
 
-        hint = QLabel(t("page.cursor.roblox_hint"))
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"font-size: 11.5px; color: {STATUS_NEUTRAL};")
-        body.addWidget(hint)
+        self.crosshair_section = _CursorSection(
+            t("page.cursor.section_crosshair"),
+            self._on_import_crosshair, self._on_reset_crosshair, self._on_crosshair_size_changed,
+        )
+        body.addWidget(self.crosshair_section)
 
         # Le stretch final doit vivre au niveau de content_layout() (comme
         # sur les autres pages, ex. page_fastflags.py), pas à l'intérieur de
@@ -147,6 +166,8 @@ class CursorPage(BasePage):
         self.general_section.set_size(self._manager.general_size)
         self.roblox_section.set_current(self._manager.roblox_path)
         self.roblox_section.set_size(self._manager.roblox_size)
+        self.crosshair_section.set_current(self._manager.crosshair_path)
+        self.crosshair_section.set_size(self._manager.crosshair_size)
 
     def _on_import_general(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, t("page.cursor.import_btn"), "", _IMAGE_FILTER)
@@ -179,6 +200,22 @@ class CursorPage(BasePage):
 
     def _on_roblox_size_changed(self, value: int) -> None:
         self._manager.set_roblox_size(value)
+
+    def _on_import_crosshair(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, t("page.cursor.import_btn"), "", _IMAGE_FILTER)
+        if not path:
+            return
+        if not self._manager.apply_crosshair(path):
+            self._show_error()
+            return
+        self._refresh()
+
+    def _on_reset_crosshair(self) -> None:
+        self._manager.reset_crosshair()
+        self._refresh()
+
+    def _on_crosshair_size_changed(self, value: int) -> None:
+        self._manager.set_crosshair_size(value)
 
     def _show_error(self) -> None:
         QMessageBox.warning(self, t("page.cursor.title"), t("page.cursor.apply_error"))

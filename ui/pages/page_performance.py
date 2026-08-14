@@ -32,7 +32,7 @@ from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
 from ui.pages.page_risk import RiskControlsPanel
 from ui.ring_gauge import RingGauge
-from ui.scrollbar_style import style_scrollbar_directly
+from ui.scrollbar_style import scrollarea_gap_qss, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.styled_message_box import show_confirm
 from ui.toggle_switch import ToggleSwitch
@@ -65,11 +65,6 @@ ROBLOX_PROCESS_NAME = "RobloxPlayerBeta.exe"
 # bibliothèque de macros) : ces onglets vivent dans un QStackedWidget
 # (section_stack), contexte où le QProxyStyle app-wide seul n'est pas fiable.
 _TAB_SCROLLBAR_THICKNESS = 11  # -10% (12 -> 11)
-# Même valeur que la marge gauche du contenu de chacun des 3 onglets
-# (results_layout / _OverlayControlsPanel / RiskControlsPanel, tous à 12px) :
-# l'écart entre la barre et le bord droit de la carte doit être identique à
-# l'écart entre le contenu et son bord gauche.
-_TAB_SCROLLBAR_GAP = 12
 # Petit espace en haut/bas de la barre (au lieu de toucher les bords) : le
 # "margin" QSS sur la QScrollBar elle-même n'a aucun effet vertical ici
 # (vérifié : bar.y()==0 et bar.height()==viewport.height() peu importe la
@@ -378,7 +373,7 @@ class _OverlayControlsPanel(QFrame):
         enable_row = QHBoxLayout()
         enable_row.setSpacing(8)
         enable_label = QLabel(t("page.performance.overlay_enable_tile"))
-        enable_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        enable_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         enable_row.addWidget(enable_label)
         enable_row.addStretch(1)
         self.enable_toggle = ToggleSwitch(checked=enabled)
@@ -656,7 +651,7 @@ class _StatusCardWidget(QFrame):
 
         header = QHBoxLayout()
         title = QLabel(t(card.title_key))
-        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         # wordWrap + stretch : sans ça, un titre long ("Xbox Game Bar /
         # enregistrement en arrière-plan") imposait une largeur minimale à
         # toute la carte (donc à toute la zone de résultats) plutôt que de
@@ -884,6 +879,25 @@ class PerformancePage(BasePage):
         super().hideEvent(event)
         self._stop_live_thread_if_unneeded()
         self.scan_loader.stop()
+
+    def shutdown(self) -> None:
+        """Arrêt INCONDITIONNEL et SYNCHRONE de tout ce qui pourrait encore
+        tourner — appelé juste avant que cette page soit réellement détruite
+        (voir MainWindow.reload_language), PAS à une simple navigation.
+        hideEvent ne suffit pas ici : _stop_live_thread_if_unneeded laisse
+        volontairement le monitoring/overlay actif pendant qu'on quitte
+        cette page pour aller jouer — un comportement voulu en navigation
+        normale, mais qui laisserait un QThread tourner pendant que son
+        widget parent est détruit (Qt plante avec un qFatal
+        "QThread: Destroyed while thread is still running", jamais une
+        exception Python catchable — cause réelle diagnostiquée d'un
+        plantage silencieux au changement de langue)."""
+        self._stop_live_thread()
+        self._stop_ping_thread()
+        self._stop_fps_thread()
+        for worker in (getattr(self, "_fix_worker", None), getattr(self, "_optimize_worker", None)):
+            if worker is not None and worker.isRunning():
+                worker.wait(2000)
         self._scan_overlay.hide()
 
     def _overlay_enabled(self) -> bool:
@@ -1024,10 +1038,16 @@ class PerformancePage(BasePage):
         # soit la valeur déclarée. Pour la détacher des bords de la carte
         # (droit, haut, bas), on rogne donc directement la carte elle-même
         # via un padding, plutôt que la scrollbar : viewport ET scrollbar se
-        # déplacent/réduisent ensemble.
+        # déplacent/réduisent ensemble. padding-right = CONTENT_SCROLLBAR_GAP
+        # (règle globale, voir CLAUDE.md/ui/scrollbar_style.py), qui se
+        # trouve aussi être la même valeur que la marge gauche du contenu de
+        # chacun des 3 onglets (results_layout / _OverlayControlsPanel /
+        # RiskControlsPanel, tous à 12px) : l'écart droite/gauche reste donc
+        # symétrique. padding-top/bottom reste une nuance propre à cette page
+        # (_TAB_SCROLLBAR_VERTICAL_INSET), pas la règle globale.
         scroll.setStyleSheet(
             "QScrollArea {"
-            f" padding-right: {_TAB_SCROLLBAR_GAP}px;"
+            f" {scrollarea_gap_qss()}"
             f" padding-top: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
             f" padding-bottom: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
             " }"
@@ -1349,7 +1369,7 @@ class PerformancePage(BasePage):
         self.results_layout.addWidget(self._build_bottleneck_card(result))
 
         improvements_title = QLabel(t("page.performance.improvements_title"))
-        improvements_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE;")
+        improvements_title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         self.results_layout.addWidget(improvements_title)
 
         if result.cards:
@@ -1540,7 +1560,7 @@ class PerformancePage(BasePage):
         layout.setSpacing(10)
 
         title = QLabel(t("page.performance.config_title"))
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE;")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
         layout.addWidget(title)
 
         grid = QGridLayout()
