@@ -55,6 +55,12 @@ from ui.toggle_switch import ToggleSwitch
 from ui.trash_icon_button import TrashIconButton
 
 _FIELD_HEIGHT = 32
+# Ligne "Nom de la macro" : champ -20% de largeur / +10% de hauteur par
+# rapport aux valeurs standard ci-dessus (demande spécifique à cette ligne,
+# ne touche pas _FIELD_HEIGHT/240 utilisés ailleurs — mêmes valeurs que
+# macro_simple_tab.py, pour garder les deux champs identiques).
+_NAME_FIELD_WIDTH = round(240 * 0.8)
+_NAME_ROW_HEIGHT = round(_FIELD_HEIGHT * 1.1)
 # Largeurs ajustées au contenu attendu (6 caractères hexa, jusqu'à
 # "-99999" pour les coordonnées) plutôt qu'un espace vide inutile.
 _HEX_FIELD_WIDTH = 68
@@ -65,6 +71,17 @@ _KEY_CAPTURE_WIDTH = 100
 # Espacement label -> élément associé (x1.2 par rapport aux 6px d'origine).
 _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 _HEX_RE = re.compile(r"[^0-9A-Fa-f]")
+# Longueur du trait vert de séparation : recalibrée (mesure réelle) pour
+# s'arrêter exactement au bord DROIT du bouton "Réinitialiser" (540px =
+# x() + width() du bouton sur le 1er emplacement) — l'ancienne valeur (453)
+# datait d'un calibrage plus ancien du bouton et avait dérivé depuis
+# (largeurs de champs/boutons retouchées à plusieurs reprises sur cette
+# ligne sans jamais recalculer cette longueur). Le trait suit le bouton
+# (calé sur SA position), jamais l'inverse : essayer de rétrécir
+# Enregistrer/Réinitialiser pour les faire tenir dans une longueur de trait
+# déjà fixée forcerait toggle/status_label (sur la même ligne, à gauche
+# d'eux) à chevaucher ces boutons — voir _build_control_row.
+_SEPARATOR_WIDTH = 540
 
 MAX_SLOTS = 3
 
@@ -123,10 +140,9 @@ class PixelMacroSlot(QWidget):
         # "Réaction" (qui remplissent toute la largeur de ce layout, voir
         # ci-dessous) touchaient quasiment la scrollbar de la page (voir
         # MacroPage._build_tab_scroll_area) — la marge de la QScrollArea
-        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. _build_control_row
-        # compense cette marge (35 -> 21, soit -14) pour garder Réinitialiser
-        # aligné avec le groupe d'onglets "Macro type" au-dessus (mesure déjà
-        # empirique, voir son commentaire).
+        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. Voir
+        # _build_control_row pour l'alignement de Réinitialiser (indépendant
+        # de cette marge, calé sur le trait vert de séparation).
         layout.setContentsMargins(0, 0, 14, 0)
         layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
@@ -134,6 +150,12 @@ class PixelMacroSlot(QWidget):
 
         layout.addLayout(self._build_header_row())
         layout.addLayout(self._build_name_row())
+        # Même largeur que la carte "Activation" de macro_simple_tab.py :
+        # ajoutées directement (pas de marge droite supplémentaire dédiée à
+        # ces deux cartes en particulier — un essai précédent en ajoutait
+        # une, mais ça les rendait plus étroites que "Activation", une
+        # incohérence visuelle entre les deux sous-pages pire que le
+        # problème qu'elle réglait).
         layout.addWidget(self._build_detection_card())
         layout.addWidget(self._build_reaction_card())
 
@@ -175,7 +197,13 @@ class PixelMacroSlot(QWidget):
 
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText(t("page.macro.pixel.name_label"))
-        self.name_input.setFixedWidth(240)
+        self.name_input.setFixedWidth(_NAME_FIELD_WIDTH)
+        # Hauteur fixe (_NAME_ROW_HEIGHT) : sans ça, la hauteur naturelle d'un
+        # QLineEdit (calculée par Qt à partir du padding/police QSS) ne
+        # correspondait pas exactement à celle du même champ dans Macro
+        # Simple (macro_simple_tab.py, où setFixedHeight est déjà posé) —
+        # les deux "Nom de la macro" doivent avoir la même hauteur.
+        self.name_input.setFixedHeight(_NAME_ROW_HEIGHT)
         row.addWidget(self.name_input)
         row.addStretch(1)
         return row
@@ -210,7 +238,7 @@ class PixelMacroSlot(QWidget):
         card.setProperty("class", "card")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(17, 12, 24, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(11)  # -20% (14 -> 11) : espace sous le titre de carte
 
         title = QLabel(title_text)
         title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
@@ -219,11 +247,12 @@ class PixelMacroSlot(QWidget):
         return card, layout
 
     def _build_detection_card(self) -> QFrame:
-        """Carte "Détection" : sur une même ligne, aperçu/couleur/Pixel X/
-        Pixel Y (chacun avec son label au-dessus, dans l'esprit de l'AHK
-        d'origine), puis le bouton "Sélectionner un pixel" EN DESSOUS (pas
-        au-dessus : on choisit d'abord de voir les champs déjà remplis avant
-        d'en changer la source)."""
+        """Carte "Détection" : aperçu/couleur/Pixel X/Pixel Y (chacun avec
+        son label au-dessus, dans l'esprit de l'AHK d'origine) PUIS le
+        bouton "Sélectionner un pixel" à DROITE de ces champs, sur la MÊME
+        ligne (pas en dessous) — on choisit d'abord de voir les champs déjà
+        remplis avant d'en changer la source, l'action pour le faire reste
+        juste à côté plutôt que sur sa propre ligne."""
         card, layout = self._build_card(t("page.macro.pixel.detection_card_title"))
 
         # Même hauteur que les champs voisins (Couleur/Pixel X/Pixel Y),
@@ -249,6 +278,20 @@ class PixelMacroSlot(QWidget):
         self.y_input.setFixedWidth(_COORD_FIELD_WIDTH)
         self.y_input.setFixedHeight(_FIELD_HEIGHT)
 
+        # Après les champs (pas avant, voir docstring) — texte en couleur
+        # neutre standard (STATUS_NEUTRAL), pas l'accent turquoise habituel
+        # de variant="neutral" (voir ui/animated_button.py : ce nom désigne
+        # le CONTOUR gris, le texte reste turquoise par défaut) : ce bouton
+        # ne doit plus ressortir visuellement au milieu des champs déjà
+        # remplis. Hauteur = _FIELD_HEIGHT (pas la hauteur par défaut
+        # d'AnimatedButton, 40px) pour s'aligner exactement sur les champs
+        # voisins une fois sur leur même ligne.
+        self.pick_btn = AnimatedButton(
+            t("page.macro.pixel.pick_btn"), variant="neutral", text_color=STATUS_NEUTRAL,
+            height=_FIELD_HEIGHT,
+        )
+        self.pick_btn.clicked.connect(self._start_picking)
+
         columns_row = QHBoxLayout()
         columns_row.setSpacing(10)
         # Pas de texte de label au-dessus du carré de couleur (juste
@@ -259,23 +302,13 @@ class PixelMacroSlot(QWidget):
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.color_label"), self.hex_input))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_x_label"), self.x_input))
         columns_row.addLayout(self._labeled_column(t("page.macro.pixel.pixel_y_label"), self.y_input))
+        # Même traitement que le carré de couleur : label vide au-dessus pour
+        # garder ce bouton aligné avec les champs (dont le label occupe de la
+        # hauteur au-dessus), plutôt qu'un bouton "flottant" plus haut que les
+        # autres.
+        columns_row.addLayout(self._labeled_column("", self.pick_btn))
         columns_row.addStretch(1)
         layout.addLayout(columns_row)
-
-        # Après les champs (pas avant, voir docstring) — texte en couleur
-        # neutre standard (STATUS_NEUTRAL), pas l'accent turquoise habituel
-        # de variant="neutral" (voir ui/animated_button.py : ce nom désigne
-        # le CONTOUR gris, le texte reste turquoise par défaut) : ce bouton
-        # ne doit plus ressortir visuellement au milieu des champs déjà
-        # remplis.
-        self.pick_btn = AnimatedButton(
-            t("page.macro.pixel.pick_btn"), variant="neutral", text_color=STATUS_NEUTRAL,
-        )
-        self.pick_btn.clicked.connect(self._start_picking)
-        pick_row = QHBoxLayout()
-        pick_row.addWidget(self.pick_btn)
-        pick_row.addStretch(1)
-        layout.addLayout(pick_row)
 
         return card
 
@@ -353,16 +386,15 @@ class PixelMacroSlot(QWidget):
         self.reset_btn = AnimatedButton(t("page.macro.pixel.reset_btn"), variant="neutral")
         self.reset_btn.clicked.connect(self._on_reset_clicked)
         row.addWidget(self.reset_btn)
-        # Petite marge à droite : sans ça, ces boutons touchent directement
-        # le bord du viewport (donc la scrollbar) une fois la colonne gauche
-        # contrainte à sa largeur exacte par la QScrollArea (voir
-        # MacroPage.__init__ dans page_macro.py). 21px (pas 35) : le layout
-        # parent (voir __init__) porte maintenant lui-même une marge droite
-        # de 14px (même raison, cartes "Détection"/"Réaction"), donc 21+14=35
-        # retombe exactement sur la même position mesurée empiriquement
-        # qu'avant — alignée avec le bord droit du groupe des 3 onglets
-        # "Macro type" tout en haut de la page (même correctif que
-        # macro_simple_tab.py).
+        # 21px (pas 35) : le layout parent (voir __init__) porte maintenant
+        # lui-même une marge droite de 14px (cartes "Détection"/"Réaction"),
+        # donc 21+14=35 retombe exactement sur la position mesurée du bord
+        # droit de "Réinitialiser" — voir PixelMacroTab._build_green_separator
+        # (longueur du trait vert CALÉE sur cette position, pas l'inverse :
+        # essayer de rétrécir ce bouton pour l'aligner sur une longueur de
+        # trait déjà fixée forcerait toggle/status_label, sur cette même
+        # ligne à gauche, à chevaucher Enregistrer/Réinitialiser — voir le
+        # commentaire sur _build_green_separator).
         row.addSpacing(21)
         return row
 
@@ -718,15 +750,11 @@ class PixelMacroTab(QWidget):
         self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
-        # Longueur mesurée pour s'arrêter exactement au bord DROIT du bouton
-        # "Réinitialiser" (453px = x() + width() du bouton sur le 1er
-        # emplacement, mesuré directement, une fois Enregistrer/Réinitialiser
-        # eux-mêmes alignés sur les onglets "Macro type" — voir
-        # _build_control_row) plutôt que de continuer sur toute la largeur —
-        # aligné à gauche pour ne pas être centré/étiré par le layout (mesure
+        # _SEPARATOR_WIDTH : voir sa définition en haut du fichier — aligné à
+        # gauche pour ne pas être centré/étiré par le layout (mesure
         # empirique fixe, pas recalculée par langue ; voir la même
         # correction dans macro_simple_tab.py).
-        layout.addWidget(_build_green_separator(453), 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(_build_green_separator(_SEPARATOR_WIDTH), 0, Qt.AlignmentFlag.AlignLeft)
 
         self.add_slot_btn = AnimatedButton(t("page.macro.pixel.add_slot_btn"), variant="neutral")
         self.add_slot_btn.clicked.connect(self._on_add_slot_clicked)
@@ -748,7 +776,7 @@ class PixelMacroTab(QWidget):
             # Un séparateur AVANT ce nouvel emplacement (pas seulement un
             # seul, tout en bas, après le dernier) : garde une ligne verte
             # entre CHAQUE emplacement, pas seulement après le dernier.
-            separator = _build_green_separator(453)
+            separator = _build_green_separator(_SEPARATOR_WIDTH)
             self._slots_layout.addWidget(separator, 0, Qt.AlignmentFlag.AlignLeft)
 
         slot = PixelMacroSlot(deletable=deletable)

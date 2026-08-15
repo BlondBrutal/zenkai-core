@@ -1,12 +1,18 @@
 """
-Ping vers le serveur de jeu auquel Roblox (ROBLOX_PROCESS_NAME, voir
-page_performance.py) est connecté, pour l'élément "Ping" de l'overlay
-Performance.
+Ping vers le serveur de jeu auquel le jeu actuellement au premier plan (voir
+features/performance/game_detection.py::detect_foreground_game, Valorant,
+Roblox ou tout autre jeu connu) est connecté, pour l'élément "Ping" de
+l'overlay Performance.
+
+Le jeu ciblé n'est jamais figé à la création du thread : redétecté à CHAQUE
+cycle (voir _resolve_remote_ip), pour suivre automatiquement le jeu réellement
+au premier plan sans redémarrage manuel de l'overlay si l'utilisateur change
+de jeu en cours de route.
 
 L'IP à pinguer n'est jamais codée en dur : elle se déduit dynamiquement de la
 première connexion TCP établie du processus ciblé (voir _resolve_remote_ip)
-plutôt que de viser une IP Roblox fixe, qui varie selon le serveur de jeu
-assigné à la session en cours.
+plutôt que de viser une IP fixe, qui varie selon le serveur de jeu assigné à
+la session en cours.
 """
 import logging
 import re
@@ -17,6 +23,8 @@ from typing import Optional
 
 import psutil
 from PyQt6.QtCore import QThread, pyqtSignal
+
+from features.performance.game_detection import detect_foreground_game
 
 logger = logging.getLogger("zenkaiontop.performance")
 
@@ -40,16 +48,18 @@ def _hidden_subprocess_kwargs() -> dict:
 
 
 class PingMonitorThread(QThread):
-    """Un ping par cycle vers l'IP distante du processus ciblé. `ping_ready`
-    envoie None (pas une valeur inventée) si le processus est introuvable ou
-    n'a aucune connexion établie pour le moment."""
+    """Un ping par cycle vers l'IP distante du jeu connu actuellement au
+    premier plan (redétecté à chaque cycle, voir docstring du module).
+    `ping_ready` envoie None (pas une valeur inventée) si aucun jeu connu
+    n'est au premier plan, ou si le processus détecté n'a aucune connexion
+    établie pour le moment."""
 
     ping_ready = pyqtSignal(object)  # Optional[float] (ms)
 
-    def __init__(self, process_name: str, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._process_name = process_name
         self._running = False
+        self._process_name: Optional[str] = None
         self._last_ip: Optional[str] = None
 
     def run(self) -> None:
@@ -70,9 +80,22 @@ class PingMonitorThread(QThread):
         self._running = False
 
     def _resolve_remote_ip(self) -> Optional[str]:
+        detected = detect_foreground_game()
+        process_name = detected[0] if detected is not None else None
+
+        if process_name != self._process_name:
+            # Le jeu au premier plan a changé (ou a disparu) depuis le
+            # dernier cycle : une IP mémorisée pour l'ANCIEN jeu n'a aucun
+            # sens pour le nouveau, donc jamais réutilisée comme repli ici.
+            self._process_name = process_name
+            self._last_ip = None
+
+        if process_name is None:
+            return None
+
         try:
             for proc in psutil.process_iter(["name"]):
-                if proc.info.get("name") != self._process_name:
+                if (proc.info.get("name") or "").lower() != process_name:
                     continue
                 try:
                     connections = proc.net_connections(kind="tcp")

@@ -51,12 +51,6 @@ _LIVE_TILE_HEIGHT = 150
 _RING_WARNING_PERCENT = 50.0
 _RING_CRITICAL_PERCENT = 80.0
 
-# Ping et FPS de l'overlay ciblent toujours ce process, en dur : cette app
-# sert uniquement Blox Fruits (un jeu Roblox), donc le vrai process qui
-# tourne est toujours le client Roblox lui-même, quelle que soit
-# l'expérience chargée dedans — jamais un sélecteur d'application générique.
-ROBLOX_PROCESS_NAME = "RobloxPlayerBeta.exe"
-
 # Barre de scroll en forme de pilule, scopée aux 3 onglets
 # Diagnostic/Overlay/Risque (voir _build_scrollable_tab_container) — un peu
 # plus épaisse que le style app-wide habituel (10px, voir
@@ -342,8 +336,9 @@ class _OverlayControlsPanel(QFrame):
     s'applique EN DIRECT sur l'overlay déjà affiché (aperçu immédiat), pas
     seulement en quittant l'onglet.
 
-    Ping et FPS ciblent toujours Roblox (voir ROBLOX_PROCESS_NAME) : pas de
-    sélecteur d'application ici, cette app ne sert qu'à Blox Fruits/Roblox.
+    Ping et FPS détectent automatiquement le jeu au premier plan (Valorant,
+    Roblox, ou tout autre jeu connu, voir features/performance/game_detection.py)
+    : pas de sélecteur d'application ici, inutile de choisir manuellement.
 
     Pas de classe QSS "card" ici (contrairement à l'ancienne version) : ce
     panneau vit maintenant DANS une QScrollArea (voir
@@ -777,6 +772,13 @@ class PerformancePage(BasePage):
         self._live_thread: LiveMonitorThread | None = None
         self._scan_worker: PerformanceScanWorker | None = None
         self._last_result: ScanResult | None = None
+        # Masque le rectangle d'optimisation dès qu'on clique sur son bouton
+        # (voir _on_optimize_clicked) jusqu'au prochain "Relancer le
+        # diagnostic" cliqué explicitement (voir _on_rescan_clicked) — le
+        # rescan AUTOMATIQUE déclenché juste après une optimisation
+        # (_on_optimize_finished) ne doit pas le faire réapparaître tout
+        # seul.
+        self._hide_optimize_card = False
         self._overlay: PerformanceOverlay | None = None
         self._ping_thread: PingMonitorThread | None = None
         self._fps_thread: FpsMonitorThread | None = None
@@ -1104,11 +1106,11 @@ class PerformancePage(BasePage):
             self._overlay.update_sample(sample)
 
     # ------------------------------------------------------------------
-    # Ping / FPS : ciblent toujours Roblox (voir ROBLOX_PROCESS_NAME — cette
-    # app ne sert qu'à Blox Fruits/Roblox, pas besoin de sélecteur), tournent
-    # tant que l'overlay ET l'élément correspondant sont activés —
-    # indépendamment de la visibilité de cette page, comme LiveMonitorThread
-    # (voir _sync_process_threads).
+    # Ping / FPS : détectent eux-mêmes le jeu au premier plan à chaque cycle
+    # (voir docstrings de ping_monitor.py/fps_monitor.py — pas de nom de
+    # process à leur passer ici), tournent tant que l'overlay ET l'élément
+    # correspondant sont activés — indépendamment de la visibilité de cette
+    # page, comme LiveMonitorThread (voir _sync_process_threads).
     # ------------------------------------------------------------------
     def _sync_process_threads(self) -> None:
         self._sync_ping_thread()
@@ -1122,7 +1124,7 @@ class PerformancePage(BasePage):
             return
         self._stop_ping_thread()
         if want:
-            self._ping_thread = PingMonitorThread(ROBLOX_PROCESS_NAME, self)
+            self._ping_thread = PingMonitorThread(self)
             self._ping_thread.ping_ready.connect(self._on_ping_sample)
             self._ping_thread.start()
 
@@ -1140,7 +1142,7 @@ class PerformancePage(BasePage):
             return
         self._stop_fps_thread()
         if want:
-            self._fps_thread = FpsMonitorThread(ROBLOX_PROCESS_NAME, self)
+            self._fps_thread = FpsMonitorThread(self)
             self._fps_thread.fps_ready.connect(self._on_fps_sample)
             self._fps_thread.start()
 
@@ -1300,6 +1302,15 @@ class PerformancePage(BasePage):
             self.scan_loader.stop()
             self._scan_overlay.hide()
 
+    def _on_rescan_clicked(self) -> None:
+        # Seul point d'entrée qui réaffiche le rectangle d'optimisation
+        # (voir _hide_optimize_card ci-dessus) : le clic explicite sur
+        # "Lancer l'analyse"/"Relancer le diagnostic", jamais un rescan
+        # automatique déclenché ailleurs (ex: après optimisation, après la
+        # correction d'une carte individuelle).
+        self._hide_optimize_card = False
+        self._start_scan()
+
     def _start_scan(self) -> None:
         live_snapshot = self._live_thread.average_sample() if self._live_thread else None
         self._show_scan_overlay(True)
@@ -1337,7 +1348,7 @@ class PerformancePage(BasePage):
         # seul son texte change entre "Lancer l'analyse" et "Relancer le
         # diagnostic", pas le widget lui-même.
         self.scan_action_btn = AnimatedButton(self._scan_action_button_text(), variant="secondary")
-        self.scan_action_btn.clicked.connect(self._start_scan)
+        self.scan_action_btn.clicked.connect(self._on_rescan_clicked)
         self.results_layout.addWidget(self.scan_action_btn, 0, Qt.AlignmentFlag.AlignLeft)
         self.results_layout.addStretch(1)
 
@@ -1363,8 +1374,11 @@ class PerformancePage(BasePage):
 
         # Ordre d'affichage : bloc d'optimisation groupée (juste après le
         # scan, bien visible), puis fiche de configuration, puis composant
-        # limitant, puis la liste des améliorations possibles.
-        self.results_layout.addWidget(self._build_optimize_card(result))
+        # limitant, puis la liste des améliorations possibles. Le bloc
+        # d'optimisation est omis si _hide_optimize_card (voir son bouton
+        # cliqué juste avant ce rescan, _on_optimize_clicked).
+        if not self._hide_optimize_card:
+            self.results_layout.addWidget(self._build_optimize_card(result))
         self.results_layout.addWidget(self._build_config_card(result))
         self.results_layout.addWidget(self._build_bottleneck_card(result))
 
@@ -1470,11 +1484,24 @@ class PerformancePage(BasePage):
         optimize_row.addStretch(1)
         layout.addLayout(optimize_row)
 
+        # Mémorisé pour pouvoir le masquer instantanément au clic (voir
+        # _on_optimize_clicked), avant même que le rescan qui suit ait eu le
+        # temps de reconstruire les résultats.
+        self._optimize_card_frame = frame
+
         return frame
 
     def _on_optimize_clicked(self, result: ScanResult) -> None:
         self._optimize_result = result
         fixable_ids = [c.card_id for c in result.cards if c.can_auto_fix and c.card_id in _AUTO_FIXES]
+
+        # Masqué dès le clic (pas seulement après le rescan qui suit) : reste
+        # caché jusqu'au prochain "Relancer le diagnostic" explicite (voir
+        # _on_rescan_clicked et _hide_optimize_card) — y compris pendant le
+        # rescan automatique lancé par _on_optimize_finished ci-dessous, qui
+        # ne doit pas le faire réapparaître tout seul.
+        self._hide_optimize_card = True
+        self._optimize_card_frame.setVisible(False)
 
         if not fixable_ids:
             self._show_optimize_summary([])

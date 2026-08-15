@@ -58,6 +58,16 @@ from ui.trash_icon_button import TrashIconButton
 
 MAX_SLOTS = 10
 _FIELD_HEIGHT = 32
+# Ligne "Nom de la macro" : champ -20% de largeur / +10% de hauteur par
+# rapport aux valeurs standard ci-dessus (demande spécifique à cette ligne,
+# ne touche pas _FIELD_HEIGHT/240 utilisés ailleurs). Le bouton voisin
+# "Voir les coordonnées" suit la même hauteur ; sa largeur ne peut pas
+# baisser de 20% pleins comme le champ (son texte, ~260px, dépasse déjà
+# 80% de sa largeur actuelle de 298px — le couper aurait tronqué le texte),
+# donc seul son padding horizontal recule de 20% (38 -> 30px).
+_NAME_FIELD_WIDTH = round(240 * 0.8)
+_NAME_ROW_HEIGHT = round(_FIELD_HEIGHT * 1.1)
+_NAME_ROW_BTN_PADDING = round(38 * 0.8)
 _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # Largeurs fixes pour une rangée régulière (même principe que
 # _HEX_FIELD_WIDTH/_COORD_FIELD_WIDTH dans macro_pixel_tab.py) plutôt que de
@@ -69,6 +79,18 @@ _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # élident maintenant proprement (voir _refresh_text dans les deux classes)
 # plutôt que de couper le texte n'importe où.
 _HOTKEY_FIELD_WIDTH = 112
+# Longueur du trait vert de séparation : recalibrée (mesure réelle) pour
+# s'arrêter exactement au bord DROIT du bouton "Réinitialiser" (540px =
+# x() + width() du bouton sur le 1er emplacement) — l'ancienne valeur (453)
+# datait d'un calibrage plus ancien du bouton et avait dérivé depuis
+# (largeurs de champs/boutons retouchées à plusieurs reprises sur cette
+# ligne sans jamais recalculer cette longueur). Le trait suit le bouton
+# (calé sur SA position), jamais l'inverse : essayer de rétrécir
+# Enregistrer/Réinitialiser pour les faire tenir dans une longueur de trait
+# déjà fixée forcerait toggle/status_label (sur la même ligne, à gauche
+# d'eux) à chevaucher ces boutons — voir _build_control_row. Même valeur que
+# macro_pixel_tab.py._SEPARATOR_WIDTH.
+_SEPARATOR_WIDTH = 540
 # La consigne d'origine (+35%, 112 -> 151) tronquait toujours "Tant que
 # maintenu  ▾" (le plus long des 3 libellés) : largeur de texte + flèche
 # mesurée par rendu RÉEL (police neutralButton) à 128px, + 36px de padding
@@ -237,11 +259,10 @@ class MacroSimpleSlot(QWidget):
         # "Séquence" (qui remplissent toute la largeur de ce layout, voir
         # ci-dessous) touchaient quasiment la scrollbar de la page (voir
         # MacroPage._build_tab_scroll_area) — la marge de la QScrollArea
-        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. _build_control_row
-        # compense cette marge (35 -> 21, soit -14) pour garder Réinitialiser
-        # aligné avec le groupe d'onglets "Macro type" au-dessus (mesure déjà
-        # empirique, voir son commentaire) — même correctif que
-        # macro_pixel_tab.py.
+        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. Voir
+        # _build_control_row pour l'alignement de Réinitialiser (indépendant
+        # de cette marge, calé sur le trait vert de séparation) — même
+        # correctif que macro_pixel_tab.py.
         layout.setContentsMargins(0, 0, 14, 0)
         layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
@@ -294,8 +315,8 @@ class MacroSimpleSlot(QWidget):
         # fixe (_FIELD_HEIGHT) : sans ça, la hauteur naturelle d'un QLineEdit
         # (calculée par Qt à partir du padding/police QSS) ne correspond pas
         # forcément EXACTEMENT à celle imposée ci-dessous à view_coords_btn.
-        self.name_input.setFixedWidth(240)
-        self.name_input.setFixedHeight(_FIELD_HEIGHT)
+        self.name_input.setFixedWidth(_NAME_FIELD_WIDTH)
+        self.name_input.setFixedHeight(_NAME_ROW_HEIGHT)
         row.addWidget(self.name_input)
 
         # "Voir les coordonnées" vit maintenant sur cette ligne (déplacé
@@ -303,11 +324,12 @@ class MacroSimpleSlot(QWidget):
         # ligne de boutons séparée au-dessus du tableau depuis le retrait de
         # "Enregistrer" (fonction d'enregistrement des appuis en temps réel
         # retirée, voir _on_view_coords_clicked pour ce qui reste). Même
-        # hauteur que le champ "Nom de la macro" voisin (_FIELD_HEIGHT),
+        # hauteur que le champ "Nom de la macro" voisin (_NAME_ROW_HEIGHT),
         # passée explicitement à AnimatedButton (dont la hauteur par défaut,
         # 40px, ne correspondrait pas).
         self.view_coords_btn = AnimatedButton(
-            t("page.macro.simple.view_coords_btn"), variant="neutral", height=_FIELD_HEIGHT,
+            t("page.macro.simple.view_coords_btn"), variant="neutral",
+            height=_NAME_ROW_HEIGHT, horizontal_padding=_NAME_ROW_BTN_PADDING,
         )
         self.view_coords_btn.clicked.connect(self._on_view_coords_clicked)
         row.addWidget(self.view_coords_btn)
@@ -333,7 +355,7 @@ class MacroSimpleSlot(QWidget):
         card.setProperty("class", "card")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(17, 12, 24, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(11)  # -20% (14 -> 11) : espace sous le titre de carte
 
         title = QLabel(title_text)
         title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
@@ -587,9 +609,12 @@ class MacroSimpleSlot(QWidget):
         row.addWidget(self.reset_btn)
         # 21px (pas 35) : le layout parent (voir __init__) porte maintenant
         # lui-même une marge droite de 14px (cartes "Activation"/"Séquence"),
-        # donc 21+14=35 retombe exactement sur la même position mesurée
-        # empiriquement qu'avant — alignée avec le bord droit du groupe des 3
-        # onglets "Macro type" tout en haut de la page.
+        # donc 21+14=35 retombe exactement sur la position mesurée du bord
+        # droit de "Réinitialiser" — voir _build_green_separator plus bas
+        # dans ce fichier (longueur du trait vert CALÉE sur cette position,
+        # pas l'inverse : essayer de rétrécir ce bouton pour l'aligner sur
+        # une longueur de trait déjà fixée forcerait toggle/status_label, sur
+        # cette même ligne à gauche, à chevaucher Enregistrer/Réinitialiser).
         row.addSpacing(21)
         return row
 
@@ -1147,11 +1172,9 @@ class MacroSimpleTab(QWidget):
         self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
-        # Longueur alignée sur celle du groupe des 3 onglets "Macro type" tout
-        # en haut de la page (453px, mesurée empiriquement — voir
-        # _build_control_row) plutôt que de continuer sur toute la largeur —
-        # aligné à gauche pour ne pas être centré/étiré par le layout.
-        layout.addWidget(_build_green_separator(453), 0, Qt.AlignmentFlag.AlignLeft)
+        # _SEPARATOR_WIDTH : voir sa définition en haut du fichier — aligné à
+        # gauche pour ne pas être centré/étiré par le layout.
+        layout.addWidget(_build_green_separator(_SEPARATOR_WIDTH), 0, Qt.AlignmentFlag.AlignLeft)
 
         self.add_slot_btn = AnimatedButton(t("page.macro.simple.add_slot_btn"), variant="neutral")
         self.add_slot_btn.clicked.connect(self._on_add_slot_clicked)
@@ -1170,7 +1193,7 @@ class MacroSimpleTab(QWidget):
             # Un séparateur AVANT ce nouvel emplacement (pas seulement un
             # seul, tout en bas, après le dernier) : garde une ligne verte
             # entre CHAQUE emplacement, pas seulement après le dernier.
-            separator = _build_green_separator(453)
+            separator = _build_green_separator(_SEPARATOR_WIDTH)
             self._slots_layout.addWidget(separator, 0, Qt.AlignmentFlag.AlignLeft)
 
         slot = MacroSimpleSlot(deletable=deletable)

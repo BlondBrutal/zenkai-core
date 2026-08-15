@@ -130,7 +130,10 @@
       "Bash(rm -f 'C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Blond-Downloads-Roblox-ZenkaiOnTop\\\\92d0cf03-3de8-4ac9-881c-6279fa8ecc45\\\\scratchpad/debug_*.py' 'C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Blond-Downloads-Roblox-ZenkaiOnTop\\\\92d0cf03-3de8-4ac9-881c-6279fa8ecc45\\\\scratchpad/screenshot_*.py' 'C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Blond-Downloads-Roblox-ZenkaiOnTop\\\\92d0cf03-3de8-4ac9-881c-6279fa8ecc45\\\\scratchpad/*.png')",
       "Bash(rm -rf \"C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\zenkai_test_appdata4\")",
       "Bash(QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(pkill -f launch_cursor_page.py)",
+      "Bash(QT_QPA_PLATFORM=offscreen python \"C:\\\\Users\\\\Blond\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Blond-Downloads-Roblox-ZenkaiOnTop\\\\92d0cf03-3de8-4ac9-881c-6279fa8ecc45\\\\scratchpad\\\\measure_pixel_cards.py\")",
+      "Bash(QT_QPA_PLATFORM=offscreen python *)"
     ]
   }
 }

@@ -42,6 +42,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.elevation import is_admin
 from core.security_log import Category, log_event
+from features.performance.game_detection import detect_foreground_game
 
 logger = logging.getLogger("zenkaiontop.performance")
 
@@ -55,6 +56,12 @@ _POLL_INTERVAL_SECONDS = 0.4
 # on arrête d'attendre et on signale l'indisponibilité plutôt que de rester
 # muet indéfiniment.
 _STARTUP_TIMEOUT_SECONDS = 15.0
+# Intervalle entre deux vérifications "le jeu au premier plan a-t-il changé
+# (ou disparu) ?", aussi bien en attente d'un jeu connu que pendant une
+# capture en cours — assez court pour réagir vite à un alt-tab vers un autre
+# jeu, sans appeler detect_foreground_game() à chaque itération de la boucle
+# de lecture du CSV (déjà à 0.4s, ce qui suffit largement pour ce besoin).
+_GAME_RECHECK_INTERVAL_SECONDS = 2.0
 
 _SW_HIDE = 0
 _SEE_MASK_NOCLOSEPROCESS = 0x00000040
@@ -150,14 +157,22 @@ _ROLLING_WINDOW = 45  # ~0.5-1s de moyenne glissante à 60-90 FPS
 class FpsMonitorThread(QThread):
     """`fps_ready` envoie None (pas 0 ni une valeur inventée) tant qu'aucune
     frame réelle n'a été capturée — que ce soit au démarrage (élévation en
-    attente/refusée) ou si le jeu ciblé se ferme en cours de route."""
+    attente/refusée), tant qu'aucun jeu connu n'est détecté au premier plan
+    (voir features/performance/game_detection.py), ou si le jeu ciblé se
+    ferme en cours de route.
+
+    Le jeu ciblé n'est jamais figé à la création du thread : redétecté
+    périodiquement (voir _GAME_RECHECK_INTERVAL_SECONDS), pour relancer
+    automatiquement une capture PresentMon sur le NOUVEAU jeu si l'utilisateur
+    change de jeu en cours de route (PresentMon capture un seul process à la
+    fois, une session ne "suit" jamais un changement de cible toute seule)."""
 
     fps_ready = pyqtSignal(object)  # Optional[float]
 
-    def __init__(self, process_name: str, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._process_name = process_name
         self._running = False
+        self._process_name: Optional[str] = None
         self._tmp_csv = os.path.join(
             tempfile.gettempdir(), f"zenkai_fps_{os.getpid()}_{int(time.time())}.csv"
         )
@@ -169,29 +184,58 @@ class FpsMonitorThread(QThread):
             self.fps_ready.emit(None)
             return
 
-        try:
-            _run_elevated_hidden(
-                PRESENTMON_EXE,
-                [
-                    "--process_name", self._process_name,
-                    "--output_file", self._tmp_csv,
-                    "--no_console_stats",
-                    "--terminate_on_proc_exit",
-                    "--stop_existing_session",
-                    "--session_name", _SESSION_NAME,
-                ],
-            )
-        except Exception:
-            logger.exception("Impossible de lancer PresentMon")
-            self.fps_ready.emit(None)
-            return
+        while self._running:
+            self._process_name = self._wait_for_known_game()
+            if self._process_name is None:
+                # stop() a été appelé pendant l'attente d'un jeu connu.
+                break
 
-        self._tail_csv_until_stopped()
-        self._terminate_session()
-        self._cleanup_tmp_file()
+            try:
+                _run_elevated_hidden(
+                    PRESENTMON_EXE,
+                    [
+                        "--process_name", self._process_name,
+                        "--output_file", self._tmp_csv,
+                        "--no_console_stats",
+                        "--terminate_on_proc_exit",
+                        "--stop_existing_session",
+                        "--session_name", _SESSION_NAME,
+                    ],
+                )
+            except Exception:
+                logger.exception("Impossible de lancer PresentMon")
+                self.fps_ready.emit(None)
+                return
+
+            self._tail_csv_until_stopped()
+            self._terminate_session()
+            self._cleanup_tmp_file()
+            # Si _tail_csv_until_stopped est revenu parce que le jeu au
+            # premier plan a changé (pas parce que stop() a été appelé), la
+            # boucle repart ci-dessus attendre/capturer sur le nouveau jeu.
 
     def stop(self) -> None:
         self._running = False
+
+    # ------------------------------------------------------------------
+    def _wait_for_known_game(self) -> Optional[str]:
+        """Attend qu'un jeu connu (game_detection.KNOWN_GAMES) soit au
+        premier plan avant de démarrer une capture — jamais de capture "à
+        l'aveugle" sur un process arbitraire. Renvoie None si stop() est
+        appelé pendant l'attente."""
+        while self._running:
+            detected = detect_foreground_game()
+            if detected is not None:
+                return detected[0]
+            self.fps_ready.emit(None)
+            # Attente découpée en petits pas : réagit vite à stop() plutôt
+            # que de bloquer jusqu'à l'intervalle entier (même principe que
+            # ping_monitor.py).
+            for _ in range(int(_GAME_RECHECK_INTERVAL_SECONDS * 10)):
+                if not self._running:
+                    break
+                time.sleep(0.1)
+        return None
 
     # ------------------------------------------------------------------
     def _tail_csv_until_stopped(self) -> None:
@@ -201,9 +245,24 @@ class FpsMonitorThread(QThread):
         values: deque = deque(maxlen=_ROLLING_WINDOW)
         got_any_row = False
         start = time.monotonic()
+        last_game_check = time.monotonic()
 
         while self._running:
             time.sleep(_POLL_INTERVAL_SECONDS)
+
+            now = time.monotonic()
+            if now - last_game_check >= _GAME_RECHECK_INTERVAL_SECONDS:
+                last_game_check = now
+                detected = detect_foreground_game()
+                current_target = detected[0] if detected is not None else None
+                if current_target != self._process_name:
+                    # Le jeu au premier plan a changé (fermé, ou un autre jeu
+                    # connu a pris le focus) : cette capture ne cible plus le
+                    # bon process, on l'arrête ici — run() relance une
+                    # nouvelle session PresentMon sur le nouveau jeu (ou
+                    # attend qu'un jeu connu réapparaisse) juste après.
+                    self.fps_ready.emit(None)
+                    return
 
             if not os.path.isfile(self._tmp_csv):
                 if not got_any_row and time.monotonic() - start > _STARTUP_TIMEOUT_SECONDS:

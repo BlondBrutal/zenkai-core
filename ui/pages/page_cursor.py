@@ -68,14 +68,15 @@ class _CursorSection(QFrame):
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
 
-        # Espace additionnel, EN PLUS du spacing() général de layout (14px) :
-        # sans lui, la ligne de boutons ("Importer une image"/"Réinitialiser")
-        # et le label "Taille" juste en dessous paraissaient encore
-        # collés/trop proches malgré ce spacing général (vérifié par capture
-        # d'écran réelle : 8px de marge en plus ne suffisait pas, ni même
-        # 16px — portée à 28px).
-        layout.addSpacing(28)
-
+        # Espace additionnel spécifique à CET écart (en plus du spacing()
+        # général de 14px du layout) : malgré un écart mesuré identique
+        # (14px) des deux côtés du bloc "Taille"/"32 px" via la géométrie
+        # réelle, le rendu réel montrait "Taille" au contact visuel de la
+        # ligne de boutons au-dessus — 14px seuls ne suffisent pas ici (texte
+        # + ligne de boutons juste au-dessus, contrairement à en dessous où
+        # rien ne resserre visuellement le slider). Rompt donc la symétrie
+        # stricte au profit de l'absence de chevauchement, qui prime.
+        layout.addSpacing(10)
         size_header = QHBoxLayout()
         size_label = QLabel(t("page.cursor.size_label"))
         size_label.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")

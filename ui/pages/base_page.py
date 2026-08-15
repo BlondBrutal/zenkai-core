@@ -31,10 +31,11 @@ class BasePage(QWidget):
         # au même niveau visuel que le titre plutôt que noyée plus bas.
         self._header_layout = QHBoxLayout()
         self._header_layout.setContentsMargins(0, 0, 0, 0)
-        # -30% (12 -> 8) : écart entre la fin du texte du titre et le badge
-        # "?" (voir add_info_badge, inséré juste après le titre dans ce même
-        # layout) jugé trop large.
-        self._header_layout.setSpacing(8)
+        # -30% (12 -> 8) puis -25% supplémentaires (8 -> 6) : écart entre la
+        # fin du texte du titre et le badge "?" (voir add_info_badge, inséré
+        # juste après le titre dans ce même layout) jugé trop large à chaque
+        # passe.
+        self._header_layout.setSpacing(6)
 
         self.title_label = QLabel(title)
         self.title_label.setProperty("class", "pageTitle")

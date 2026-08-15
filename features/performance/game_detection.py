@@ -21,8 +21,36 @@ ROBLOX_EXE_NAME = "robloxplayerbeta.exe"
 
 # Ajouter un jeu ici (nom d'exe en minuscules -> nom affiché) suffit à le
 # faire reconnaître par detect_foreground_game(), sans rien changer d'autre.
+#
+# Le nom d'exe doit être celui du process RÉELLEMENT propriétaire de la
+# fenêtre de jeu au premier plan (pas forcément le nom du raccourci/lanceur
+# visible sur le Bureau) : plusieurs jeux ci-dessous lancent un launcher
+# séparé (ex. Riot Client pour Valorant) puis un process "*-Win64-Shipping"
+# distinct pour la fenêtre de jeu elle-même — c'est ce second nom qu'il faut
+# reconnaître ici.
 KNOWN_GAMES: dict[str, str] = {
     ROBLOX_EXE_NAME: "Roblox",
+    "valorant-win64-shipping.exe": "Valorant",
+    "valorant.exe": "Valorant",
+    "csgo.exe": "Counter-Strike: Global Offensive",
+    "cs2.exe": "Counter-Strike 2",
+    "fortniteclient-win64-shipping.exe": "Fortnite",
+    "leagueclient.exe": "League of Legends",
+    "league of legends.exe": "League of Legends",
+    "dota2.exe": "Dota 2",
+    "r5apex.exe": "Apex Legends",
+    "overwatch.exe": "Overwatch 2",
+    "rainbowsix.exe": "Rainbow Six Siege",
+    "rocketleague.exe": "Rocket League",
+    "tslgame.exe": "PUBG: Battlegrounds",
+    "gta5.exe": "Grand Theft Auto V",
+    # "javaw.exe" (Minecraft Java Edition) volontairement absent : ce nom de
+    # process est partagé par N'IMPORTE QUELLE application Java (IDE, outils
+    # divers...), pas seulement Minecraft — l'ajouter déclencherait "Optimiser
+    # pour Minecraft" au premier plan d'une appli Java sans rapport, un faux
+    # positif trompeur. Seule l'édition Bedrock, au nom d'exe unique, est
+    # reconnue ci-dessous.
+    "minecraft.windows.exe": "Minecraft",
 }
 
 # Fonctions Windows nécessaires pour savoir quelle fenêtre est au premier
