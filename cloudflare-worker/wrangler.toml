@@ -1,0 +1,13 @@
+# Config optionnelle pour déployer via la CLI "wrangler" (npm) au lieu de
+# l'éditeur en ligne du dashboard Cloudflare. Les deux méthodes sont
+# équivalentes : voir CLAUDE.md pour la marche à suivre pas à pas.
+name = "zenkai-license-relay"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# GITHUB_TOKEN ne doit JAMAIS apparaître ici en clair : à ajouter en secret
+# via `wrangler secret put GITHUB_TOKEN` (CLI) ou l'onglet "Settings > Variables
+# and Secrets" du dashboard (bouton "Encrypt"), jamais dans ce fichier versionné.
+[vars]
+GIST_ID = "REMPLACE_PAR_L_ID_DU_GIST"
+GIST_FILENAME = "zenkai_licenses.json"

@@ -1,9 +1,13 @@
 """
 Bootstrapper Roblox : détection de l'installation, sauvegarde/restauration
 du vrai ClientAppSettings.json, et orchestration "injecte les Fast Flags
-PUIS lance le vrai client" — utilisé à la fois par le bouton "Lancer
-Roblox" (page_fastflags.py) et par le lancement headless déclenché par le
-protocole roblox-player:// (voir main.py).
+PUIS lance le vrai client" — utilisé par le lancement headless déclenché
+par le protocole roblox-player:// (voir main.py), jamais directement
+depuis l'UI (page_fastflags.py n'a plus de bouton "Lancer Roblox" ; son
+bouton "Enregistrer" écrit seulement la configuration ACTIVE, voir
+export_flags_file/get_fastflags_active_config_path, sans jamais lancer
+Roblox lui-même — c'est ce même fichier que la branche headless ci-dessous
+relit à chaque vrai lancement).
 
 Principe de sécurité central (voir aussi protocol.py) : AUCUNE étape
 d'injection/sauvegarde ne doit jamais empêcher Roblox de démarrer — toute
@@ -120,17 +124,16 @@ class LaunchResult:
     error: str | None = None
 
 
-def launch_roblox(original_args: list[str], flags_override: dict | None = None) -> LaunchResult:
-    """Point d'entrée unique du bootstrapper, appelé à la fois par le
-    bouton "Lancer Roblox" (flags_override = contenu du tableau) et par le
-    lancement headless via le protocole roblox-player:// (flags_override =
-    None, aucun tableau vivant à consulter — voir main.py).
+def launch_roblox(original_args: list[str]) -> LaunchResult:
+    """Point d'entrée unique du bootstrapper, appelé par le lancement
+    headless via le protocole roblox-player:// (voir main.py) — jamais de
+    tableau "vivant" à consulter ici, seulement la configuration ACTIVE
+    persistée sur disque (voir docstring du module).
 
     `original_args` est transmis tel quel à RobloxPlayerBeta.exe (le ticket
-    d'authentification etc. que Roblox a fourni) : [] pour un lancement
-    manuel depuis le bouton (équivalent à double-cliquer le raccourci),
-    sys.argv[1:] pour un lancement intercepté (jamais juste sys.argv[1],
-    pour transmettre aussi tout argument supplémentaire éventuel)."""
+    d'authentification etc. que Roblox a fourni) — sys.argv[1:], jamais
+    juste sys.argv[1], pour transmettre aussi tout argument supplémentaire
+    éventuel."""
     injection_ok = True
     real_path = get_client_app_settings_path()
     try:
@@ -138,25 +141,19 @@ def launch_roblox(original_args: list[str], flags_override: dict | None = None) 
         globally_enabled = bool(config.get("fastflags_globally_enabled", True))
         if not globally_enabled:
             # L'interrupteur "Fast Flags actifs" prime toujours : même un
-            # lancement bouton n'écrit rien tant qu'il est coupé (voir
+            # lancement n'écrit rien tant qu'il est coupé (voir
             # _on_kill_switch_toggled, qui vide déjà le vrai fichier).
             write_flags({})
-        elif flags_override is not None:
-            # Lancement depuis le bouton GUI : le tableau fait foi, et
-            # devient la nouvelle configuration active pour les PROCHAINS
-            # lancements (y compris ceux déclenchés sans l'app ouverte).
-            export_flags_file(flags_override, get_fastflags_active_config_path())
-            write_flags(flags_override)
         else:
-            # Lancement headless (protocole) : pas de tableau vivant, on
-            # réaffirme la dernière configuration active connue — jamais le
-            # contenu volatil du vrai fichier (voir docstring du module).
+            # On réaffirme la dernière configuration active connue —
+            # jamais le contenu volatil du vrai fichier (voir docstring du
+            # module).
             active_path = get_fastflags_active_config_path()
             if os.path.isfile(active_path):
                 write_flags(load_custom_preset(active_path))
-            # Sinon : l'utilisateur n'a jamais lancé via cette app, on ne
-            # touche à rien (comportement Roblox par défaut, sûr par
-            # construction).
+            # Sinon : l'utilisateur n'a jamais enregistré de configuration
+            # via cette app, on ne touche à rien (comportement Roblox par
+            # défaut, sûr par construction).
     except Exception as exc:
         logger.error("Injection des Fast Flags échouée, lancement quand même : %s", exc)
         injection_ok = False

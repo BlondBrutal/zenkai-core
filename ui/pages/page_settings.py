@@ -1,8 +1,11 @@
 """
-Page Paramètres : langue de l'application (Partie 3.2 du brief) et journal
+Page Paramètres : langue de l'application (Partie 3.2 du brief), journal
 de sécurité (actions sensibles journalisées par l'app — voir
-core/security_log.py). Les sections Communauté/À propos viendront dans une
-étape ultérieure.
+core/security_log.py), signalement de bug (carte "Support") et liens
+Discord/TikTok (carte "Communauté", voir _build_support_section/
+_build_community_section) — la carte "Support" est placée AVANT
+"Communauté" (signaler un problème est l'action la plus "utilitaire", à
+côté de Général/Sécurité, plutôt que noyée avec les réseaux sociaux).
 
 Le changement de langue est appliqué à chaud, sans redémarrage : cette page
 se contente de persister le choix et d'émettre language_changed, et c'est
@@ -14,28 +17,43 @@ import logging
 import os
 from datetime import datetime
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QSize, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
+from core.changelog import load_changelog, current_version
 from core.config import config
 from core.i18n import get_language, set_language, t
 from core.paths import get_logs_dir
 from core.security_log import read_events
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
-from ui.scrollbar_style import apply_viewport_scrollbar_gap
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, style_scrollbar_directly
 from ui.segmented_toggle import SegmentedToggle
-from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL
+from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.styled_message_box import show_info, show_warning
 from ui.toggle_switch import ToggleSwitch
 
 logger = logging.getLogger("zenkaiontop.settings")
 
 _LANGUAGES = [("fr", "FR"), ("en", "EN")]
+
+# Liens externes de la section "Réseaux & Support" — jamais générés/devinés,
+# ce sont exactement les URLs fournies dans la demande.
+_DISCORD_URL = "https://discord.gg/G4jeHQ6k47"
+_TIKTOK_URL = "https://tiktok.com/@zenkai.on.top"
+_GITHUB_NEW_ISSUE_URL = "https://github.com/BlondBrutal/zenkai-core/issues/new"
+
+
+def _open_url(url: str) -> None:
+    """Ouvre un lien externe dans le navigateur par défaut de l'utilisateur
+    — QDesktopServices.openUrl ne lève jamais (retourne juste False en cas
+    d'échec, ex: aucun navigateur associé), rien à envelopper dans un
+    try/except ici."""
+    QDesktopServices.openUrl(QUrl(url))
 
 # Même fond que le reste de l'app (voir CLAUDE.md, design system) : un
 # QDialog nu utilise sinon la palette Qt par défaut (fond blanc).
@@ -401,6 +419,133 @@ class _SecurityLogDialog(QDialog):
             )
 
 
+def _build_bullet_list(items: list[str]) -> QLabel | None:
+    """Une puce par ligne ("• texte"), même principe que
+    _ScriptAnalysisDialog.findings_label (page_custom_script.py) : un seul
+    QLabel wordWrap plutôt qu'un widget par ligne, largement suffisant pour
+    une liste courte en lecture seule. None si la liste est vide."""
+    if not items:
+        return None
+    label = QLabel("\n".join(f"• {item}" for item in items))
+    label.setWordWrap(True)
+    label.setStyleSheet(f"font-size: 12.5px; color: {_NORMAL_TEXT_COLOR};")
+    return label
+
+
+def _build_changelog_block(title_text: str, items: list[str], accent_color: str) -> QWidget | None:
+    """Un groupe "Ajouts" ou "Corrections" : titre + puces, écart SERRÉ
+    entre les deux (même groupe, voir spacing ci-dessous) — c'est l'écart
+    ENTRE deux groupes (posé par l'appelant, _ChangelogDialog._build_entry_widget)
+    qui doit rester nettement plus large pour bien les distinguer
+    visuellement. Couleur de titre distincte par groupe (accent_color) :
+    seul repère de hiérarchie en plus de l'espacement, jamais d'icône/emoji
+    (voir CLAUDE.md). None si la liste est vide (pas de titre de section
+    sans aucun contenu en dessous)."""
+    bullets = _build_bullet_list(items)
+    if bullets is None:
+        return None
+    block = QWidget()
+    block.setStyleSheet("background: transparent;")
+    layout = QVBoxLayout(block)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+
+    title = QLabel(title_text)
+    title.setStyleSheet(f"font-size: 11.5px; font-weight: 700; color: {accent_color};")
+    layout.addWidget(title)
+    layout.addWidget(bullets)
+    return block
+
+
+class _ChangelogDialog(QDialog):
+    """Popup "Voir le changelog" : toutes les entrées de CHANGELOG.json
+    (voir core/changelog.py), la plus récente en premier, chacune avec ses
+    sections "Ajouts"/"Corrections" — même gabarit que _SecurityLogDialog
+    (fond/bordure du thème global, boutons secondaryButton en bas)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(t("page.settings.changelog_dialog_title"))
+        self.resize(480, 480)
+        self.setStyleSheet(f"background-color: {_APP_BACKGROUND};")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        entries = load_changelog()
+
+        if entries:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("background: transparent; border: none;")
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+            content = QWidget()
+            content.setStyleSheet("background: transparent;")
+            content_layout = QVBoxLayout(content)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+            content_layout.setSpacing(16)
+
+            for entry in entries:
+                content_layout.addWidget(self._build_entry_widget(entry))
+            content_layout.addStretch(1)
+
+            scroll.setWidget(content)
+            # Espace entre le texte et la scrollbar — règle globale, voir
+            # CLAUDE.md/ui/scrollbar_style.py (une QScrollArea "nue" est,
+            # elle aussi, un QAbstractScrollArea).
+            apply_viewport_scrollbar_gap(scroll)
+            layout.addWidget(scroll, 1)
+        else:
+            empty_label = QLabel(t("page.settings.changelog_empty"))
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_label.setWordWrap(True)
+            empty_label.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
+            layout.addWidget(empty_label, 1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        close_btn = QPushButton(t("page.settings.security_log_close_btn"))
+        close_btn.setProperty("class", "secondaryButton")
+        close_btn.clicked.connect(self.close)
+        button_row.addWidget(close_btn)
+        layout.addLayout(button_row)
+
+    @staticmethod
+    def _build_entry_widget(entry) -> QWidget:
+        # Écart NETTEMENT plus large entre le header/le bloc "Ajouts"/le bloc
+        # "Corrections" (12, ici) qu'à L'INTÉRIEUR d'un bloc (titre<->puces,
+        # 4, voir _build_changelog_block) — c'est ce contraste qui rend les
+        # deux catégories visuellement distinctes au lieu d'un mur de texte
+        # uniforme. Couleur de titre différente par catégorie en plus
+        # (STATUS_OK "Ajouts" / STATUS_WARNING "Corrections") : même logique
+        # de repère que le reste de l'app (voir CLAUDE.md, jamais d'icône).
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        header = QLabel(
+            t("page.settings.changelog_entry_header").format(version=entry.version, date=entry.date)
+        )
+        header.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {STATUS_OK};")
+        layout.addWidget(header)
+
+        added_block = _build_changelog_block(t("page.settings.changelog_added_title"), entry.added, STATUS_OK)
+        if added_block is not None:
+            layout.addWidget(added_block)
+
+        fixed_block = _build_changelog_block(
+            t("page.settings.changelog_fixed_title"), entry.fixed, STATUS_WARNING,
+        )
+        if fixed_block is not None:
+            layout.addWidget(fixed_block)
+
+        return container
+
+
 class SettingsPage(BasePage):
     language_changed = pyqtSignal(str)
     always_on_top_changed = pyqtSignal(bool)
@@ -408,15 +553,56 @@ class SettingsPage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.settings.title"), "", parent)
         self.add_info_badge(t("page.settings.placeholder"))
+        self.add_beta_badge(t("app.beta_warning"))
 
-        # Espacement dédié entre les deux cartes (au-delà du spacing par
-        # défaut de BasePage, pensé pour un contenu sans cartes) — cohérent
-        # avec le rayon 14px des cartes elles-mêmes (voir CLAUDE.md, design
-        # system : "Cartes principales : 14px").
-        self.content_layout().setSpacing(14)
-        self.content_layout().addWidget(self._build_general_section())
-        self.content_layout().addWidget(self._build_security_section())
-        self.content_layout().addStretch(1)
+        # Le corps (les cartes) vit dans une QScrollArea dédiée, pas
+        # directement dans content_layout() — même pattern que
+        # ui/pages/page_macro.py::_build_tab_scroll_area/page_performance.py::
+        # _build_scrollable_tab_container : à la fenêtre fixe (987x640, voir
+        # ui/main_window.py), 5 cartes empilées (Général/Sécurité/Support/
+        # Communauté/Notes des développeurs) dépassent la hauteur visible —
+        # sans QScrollArea, Qt COMPRESSE le contenu pour le faire tenir dans
+        # la place fixe restante (repéré ici : plus aucun espace de
+        # respiration en bas) plutôt que de le faire défiler.
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        # Cohérent avec le rayon 14px des cartes elles-mêmes (voir CLAUDE.md,
+        # design system : "Cartes principales : 14px").
+        body_layout.setSpacing(14)
+        body_layout.addWidget(self._build_general_section())
+        body_layout.addWidget(self._build_security_section())
+        body_layout.addWidget(self._build_support_section())
+        body_layout.addWidget(self._build_community_section())
+        body_layout.addWidget(self._build_devnotes_section())
+        body_layout.addStretch(1)
+
+        self.content_layout().addWidget(self._build_scroll_area(body), 1)
+
+    def _build_scroll_area(self, body: QWidget) -> QScrollArea:
+        """Même réglages qu'ailleurs dans l'app (voir CLAUDE.md, section
+        "Scrollbars") : setViewportMargins via apply_viewport_scrollbar_gap
+        (jamais un padding-right QSS sur une QScrollArea nue — rétrécit tout
+        le bloc viewport+scrollbar au lieu de créer l'espace attendu entre
+        contenu et scrollbar, voir l'historique documenté dans CLAUDE.md),
+        AlwaysOn + désactivée/grisée quand rien à défiler (pas AsNeeded :
+        évite tout décalage horizontal du contenu selon qu'il déborde ou
+        non)."""
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        scroll_area.setWidget(body)
+        scroll_area.viewport().setStyleSheet("background: transparent;")
+        apply_viewport_scrollbar_gap(scroll_area)
+        vbar = scroll_area.verticalScrollBar()
+        style_scrollbar_directly(vbar)
+        vbar.setEnabled(vbar.maximum() > vbar.minimum())
+        vbar.rangeChanged.connect(lambda lo, hi: vbar.setEnabled(hi > lo))
+        return scroll_area
 
     def _build_general_section(self) -> QFrame:
         section = QFrame()
@@ -493,6 +679,117 @@ class SettingsPage(BasePage):
         layout.addLayout(row)
 
         return section
+
+    def _build_support_section(self) -> QFrame:
+        # Même carte (classe "card", 14px, marges internes 16px) que
+        # "Général"/"Sécurité" — un seul bloc : texte + bouton-lien vers le
+        # formulaire de signalement GitHub, jamais un lien texte souligné
+        # inline (cohérent avec AnimatedButton déjà utilisé partout ailleurs
+        # dans l'app pour une action cliquable). Placée AVANT "Communauté" :
+        # signaler un problème est l'action la plus "utilitaire", à côté de
+        # Général/Sécurité, plutôt que noyée avec les réseaux sociaux.
+        section = QFrame()
+        section.setProperty("class", "card")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        title = QLabel(t("page.settings.section_support"))
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
+        layout.addWidget(title)
+
+        # Texte + bouton sur la MÊME ligne (comme Général/Sécurité), pas
+        # empilés : le label prend le stretch (1) — pas un addStretch(1) à
+        # part, voir Général/Sécurité — pour qu'il se comprime/s'enroule
+        # (setWordWrap) dans l'espace restant à gauche du bouton plutôt que
+        # de pousser le bouton hors du rectangle.
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        support_label = QLabel(t("page.settings.support_text"))
+        support_label.setWordWrap(True)
+        support_label.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
+        row.addWidget(support_label, 1, Qt.AlignmentFlag.AlignVCenter)
+
+        self.github_issue_btn = AnimatedButton(t("page.settings.github_issue_btn"), variant="neutral")
+        self.github_issue_btn.clicked.connect(lambda: _open_url(_GITHUB_NEW_ISSUE_URL))
+        row.addWidget(self.github_issue_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(row)
+
+        return section
+
+    def _build_community_section(self) -> QFrame:
+        # Même carte (classe "card", 14px, marges internes 16px) que les
+        # autres sections — un seul bloc désormais (Discord/TikTok, le
+        # signalement GitHub a sa propre carte "Support" juste au-dessus,
+        # voir _build_support_section).
+        section = QFrame()
+        section.setProperty("class", "card")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        title = QLabel(t("page.settings.section_community"))
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
+        layout.addWidget(title)
+
+        # Même principe que Support ci-dessus : texte + les deux boutons sur
+        # UNE SEULE ligne, le label portant le stretch pour s'enrouler dans
+        # l'espace restant à gauche des boutons.
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        community_label = QLabel(t("page.settings.community_text"))
+        community_label.setWordWrap(True)
+        community_label.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
+        row.addWidget(community_label, 1, Qt.AlignmentFlag.AlignVCenter)
+
+        self.discord_btn = AnimatedButton(t("page.settings.discord_btn"), variant="neutral")
+        self.discord_btn.clicked.connect(lambda: _open_url(_DISCORD_URL))
+        row.addWidget(self.discord_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.tiktok_btn = AnimatedButton(t("page.settings.tiktok_btn"), variant="neutral")
+        self.tiktok_btn.clicked.connect(lambda: _open_url(_TIKTOK_URL))
+        row.addWidget(self.tiktok_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(row)
+
+        return section
+
+    def _build_devnotes_section(self) -> QFrame:
+        # Même pattern que _build_security_section : libellé à gauche, UN
+        # SEUL contrôle aligné à droite (stretch avant le contrôle) — ici
+        # la version actuelle en texte (pas éditable) suivie du bouton "Voir
+        # le changelog". La version affichée vient TOUJOURS de
+        # core.changelog.current_version() (l'entrée la plus récente de
+        # CHANGELOG.json) — jamais une chaîne à dupliquer/resynchroniser ici.
+        section = QFrame()
+        section.setProperty("class", "card")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+
+        title = QLabel(t("page.settings.section_devnotes"))
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
+        layout.addWidget(title)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        label = QLabel(t("page.settings.current_version_label").format(version=current_version()))
+        label.setStyleSheet(f"font-size: 13px; color: {STATUS_NEUTRAL};")
+        row.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addStretch(1)
+
+        self.changelog_btn = AnimatedButton(t("page.settings.changelog_btn"), variant="neutral")
+        self.changelog_btn.clicked.connect(self._on_changelog_clicked)
+        row.addWidget(self.changelog_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(row)
+
+        return section
+
+    def _on_changelog_clicked(self) -> None:
+        # Reconstruite à chaque clic (pas d'instance persistante), même
+        # principe que _on_view_logs_clicked : relit CHANGELOG.json à chaque
+        # ouverture plutôt que de mettre en cache un contenu qui ne change
+        # de toute façon jamais en cours de session, mais reste cohérent
+        # avec le reste de la page.
+        _ChangelogDialog(self).exec()
 
     def _on_view_logs_clicked(self) -> None:
         # Reconstruite à chaque clic (pas d'instance persistante) : la

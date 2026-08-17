@@ -17,8 +17,9 @@ NAV_ITEMS = [
     ("license", "nav.license"),
     ("performance", "nav.performance"),
     ("macro", "nav.macro"),
-    ("fastflags", "nav.fastflags"),
     ("custom_script", "nav.custom_script"),
+    ("fastflags", "nav.fastflags"),
+    ("fleasion", "nav.fleasion"),
     ("cursor", "nav.cursor"),
 ]
 

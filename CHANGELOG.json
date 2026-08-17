@@ -1,0 +1,20 @@
+[
+  {
+    "version": "1.0",
+    "date": "2026-08-16",
+    "added": [
+      "Nouvelle page Fleasion pour remplacer textures, sons et meshes dans Roblox",
+      "Détection automatique de n'importe quel jeu, pas seulement Roblox",
+      "Le viseur reste maintenant affiché en permanence, même hors jeu",
+      "Nouvelles sections Support et Communauté dans les Paramètres",
+      "Indicateur \"bêta\" visible sur toutes les pages"
+    ],
+    "fixed": [
+      "Éléments qui débordaient sur la page Macro",
+      "Boutons mal alignés sur les macros",
+      "Blocage lors de la redéfinition d'un clic de souris",
+      "Espacement irrégulier sur la page Curseur",
+      "Fiabilité du lancement des scripts personnalisés"
+    ]
+  }
+]

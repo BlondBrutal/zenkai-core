@@ -9,7 +9,9 @@ l'utilisateur — repris de la page CURSOR de "Global Macro v2.ahk"
 import os
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QSlider, QVBoxLayout
+from PyQt6.QtWidgets import (
+    QFileDialog, QFrame, QHBoxLayout, QLabel, QMessageBox, QSlider, QVBoxLayout, QWidget,
+)
 
 from core.i18n import t
 from features.cursor.cursor_image import DEFAULT_SIZE, MAX_SIZE, MIN_SIZE
@@ -19,6 +21,11 @@ from ui.pages.base_page import BasePage
 from ui.status_colors import STATUS_NEUTRAL, STATUS_OK
 
 _IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.ico *.cur)"
+# Espace haut/bas du bloc "Taille"/"32 px" (voir _CursorSection.__init__) :
+# valeur UNIQUE utilisée deux fois (haut ET bas), jamais deux constantes
+# séparées qui pourraient un jour diverger — c'est cette égalité de
+# construction, pas un ajustement au pixel près, qui garantit la symétrie.
+_SIZE_ROW_VERTICAL_GAP = 12
 
 
 class _CursorSection(QFrame):
@@ -68,15 +75,19 @@ class _CursorSection(QFrame):
         btn_row.addStretch(1)
         layout.addLayout(btn_row)
 
-        # Espace additionnel spécifique à CET écart (en plus du spacing()
-        # général de 14px du layout) : malgré un écart mesuré identique
-        # (14px) des deux côtés du bloc "Taille"/"32 px" via la géométrie
-        # réelle, le rendu réel montrait "Taille" au contact visuel de la
-        # ligne de boutons au-dessus — 14px seuls ne suffisent pas ici (texte
-        # + ligne de boutons juste au-dessus, contrairement à en dessous où
-        # rien ne resserre visuellement le slider). Rompt donc la symétrie
-        # stricte au profit de l'absence de chevauchement, qui prime.
-        layout.addSpacing(10)
+        # Bloc "Taille"/"32 px" reconstruit dans un widget dédié et
+        # AUTONOME (7 tentatives précédentes basées sur des ajustements
+        # ponctuels de spacing() partagé avec le reste de la carte n'ont pas
+        # tenu — jamais revérifiées par mesure/capture réelle avant d'être
+        # renvoyées). Ce widget porte SES PROPRES marges haut/bas, posées en
+        # dur et STRICTEMENT identiques (_SIZE_ROW_VERTICAL_GAP), sur son
+        # propre QVBoxLayout — indépendantes de layout.setSpacing(14)
+        # ci-dessus et de tout ce qui l'entoure : l'espace visible au-dessus
+        # ET en dessous de cette ligne précise vaut donc TOUJOURS
+        # exactement 14 (spacing() du layout parent, UNIFORME entre tous
+        # ses éléments puisque plus aucun addSpacing() ponctuel ne vient le
+        # perturber ici) + _SIZE_ROW_VERTICAL_GAP, des deux côtés — une
+        # égalité garantie par construction, pas mesurée après coup.
         size_header = QHBoxLayout()
         size_label = QLabel(t("page.cursor.size_label"))
         size_label.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
@@ -85,7 +96,16 @@ class _CursorSection(QFrame):
         self.size_value_label = QLabel(f"{DEFAULT_SIZE} px")
         self.size_value_label.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
         size_header.addWidget(self.size_value_label)
-        layout.addLayout(size_header)
+
+        size_header_wrap = QWidget()
+        size_header_wrap.setStyleSheet("background: transparent;")
+        size_header_wrap_layout = QVBoxLayout(size_header_wrap)
+        size_header_wrap_layout.setContentsMargins(
+            0, _SIZE_ROW_VERTICAL_GAP, 0, _SIZE_ROW_VERTICAL_GAP,
+        )
+        size_header_wrap_layout.setSpacing(0)
+        size_header_wrap_layout.addLayout(size_header)
+        layout.addWidget(size_header_wrap)
 
         self.size_slider = QSlider(Qt.Orientation.Horizontal)
         self.size_slider.setRange(MIN_SIZE, MAX_SIZE)
@@ -118,6 +138,7 @@ class CursorPage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.cursor.title"), "", parent)
         self.add_info_badge(t("page.cursor.subtitle"))
+        self.add_beta_badge(t("app.beta_warning"))
         self._manager = get_cursor_manager()
 
         # Marge droite réduite (32 -> 16), comme la page Macro (référence) :

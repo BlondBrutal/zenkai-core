@@ -32,7 +32,7 @@ from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
 from ui.pages.page_risk import RiskControlsPanel
 from ui.ring_gauge import RingGauge
-from ui.scrollbar_style import scrollarea_gap_qss, style_scrollbar_directly
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
 from ui.styled_message_box import show_confirm
 from ui.toggle_switch import ToggleSwitch
@@ -762,6 +762,7 @@ class PerformancePage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.performance.title"), "", parent)
         self.add_info_badge(t("page.performance.subtitle"))
+        self.add_beta_badge(t("app.beta_warning"))
 
         # Marge droite réduite (32 -> 16), comme la page Macro (référence) :
         # cohérence de largeur de contenu entre toutes les pages (voir aussi
@@ -1037,25 +1038,32 @@ class PerformancePage(BasePage):
         # QSS "margin" sur une QScrollBar n'a aucun effet ici (ni horizontal
         # ni vertical, vérifié) — la place réservée pour la barre ("width")
         # comme sa position (haut/bas) ne bougent pas d'un pixel quelle que
-        # soit la valeur déclarée. Pour la détacher des bords de la carte
-        # (droit, haut, bas), on rogne donc directement la carte elle-même
-        # via un padding, plutôt que la scrollbar : viewport ET scrollbar se
-        # déplacent/réduisent ensemble. padding-right = CONTENT_SCROLLBAR_GAP
-        # (règle globale, voir CLAUDE.md/ui/scrollbar_style.py), qui se
-        # trouve aussi être la même valeur que la marge gauche du contenu de
-        # chacun des 3 onglets (results_layout / _OverlayControlsPanel /
-        # RiskControlsPanel, tous à 12px) : l'écart droite/gauche reste donc
-        # symétrique. padding-top/bottom reste une nuance propre à cette page
-        # (_TAB_SCROLLBAR_VERTICAL_INSET), pas la règle globale.
+        # soit la valeur déclarée. padding-top/bottom (haut/bas de la carte,
+        # nuance propre à cette page, _TAB_SCROLLBAR_VERTICAL_INSET) reste en
+        # QSS : viewport ET scrollbar PARTAGENT le même espace vertical, donc
+        # un padding qui rogne le contentsRect insète bien les deux ensemble
+        # de façon symétrique, sans effet de bord.
+        #
+        # padding-right (règle globale CONTENT_SCROLLBAR_GAP, voir
+        # CLAUDE.md/ui/scrollbar_style.py) N'EST PLUS ici en QSS : vérifié
+        # par mesure directe de géométrie que sur une QScrollArea "nue", un
+        # padding horizontal rogne le contentsRect ENTIER (viewport+scrollbar
+        # empilés côte à côte) depuis le bord droit AVANT qu'ils ne se
+        # partagent cet espace — le vide obtenu apparaît donc APRÈS la
+        # scrollbar (entre elle et le bord de la carte), jamais ENTRE le
+        # contenu et elle, qui restent accolés malgré ce padding. Seul
+        # apply_viewport_scrollbar_gap (setViewportMargins, appelé après
+        # setWidget ci-dessous) rétrécit réellement le viewport lui-même,
+        # indépendamment de la position de la scrollbar.
         scroll.setStyleSheet(
             "QScrollArea {"
-            f" {scrollarea_gap_qss()}"
             f" padding-top: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
             f" padding-bottom: {_TAB_SCROLLBAR_VERTICAL_INSET}px;"
             " }"
         )
         scroll.viewport().setStyleSheet("background: transparent;")
         scroll.setWidget(content)
+        apply_viewport_scrollbar_gap(scroll)
         # Voir _TAB_SCROLLBAR_THICKNESS : épaissit cette barre précise.
         style_scrollbar_directly(
             scroll.verticalScrollBar(),

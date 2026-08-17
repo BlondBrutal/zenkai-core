@@ -18,6 +18,7 @@ from ui.pages.page_performance import PerformancePage
 from ui.pages.page_fastflags import FastFlagsPage
 from ui.pages.page_settings import SettingsPage
 from ui.pages.page_custom_script import CustomScriptPage
+from ui.pages.page_fleasion import FleasionPage
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
 
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
             "macro": MacroPage(),
             "fastflags": FastFlagsPage(),
             "custom_script": CustomScriptPage(),
+            "fleasion": FleasionPage(),
             "cursor": CursorPage(),
             "settings": SettingsPage(),
         })

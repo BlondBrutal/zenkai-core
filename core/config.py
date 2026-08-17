@@ -21,6 +21,7 @@ DEFAULT_SETTINGS = {
     "macros_globally_enabled": True,
     "risk_analysis_enabled": True,
     "custom_scripts_globally_enabled": True,
+    "fleasion_globally_enabled": True,
     "cursor_general_image_path": "",
     "cursor_general_size": 32,
     "cursor_roblox_image_path": "",

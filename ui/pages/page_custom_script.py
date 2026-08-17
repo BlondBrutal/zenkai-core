@@ -323,6 +323,7 @@ class CustomScriptPage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.custom_script.title"), "", parent)
         self.add_info_badge(t("page.custom_script.subtitle"))
+        self.add_beta_badge(t("app.beta_warning"))
 
         self._current_path: str | None = None
         self._current_entry: CustomScriptEntry | None = None

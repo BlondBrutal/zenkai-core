@@ -26,6 +26,7 @@ widget directement dedans, seulement `emit()` (Qt met la connexion en file
 vers le thread GUI) — l'arrêt des écouteurs et la mise à jour visuelle ne se
 font que dans les slots connectés, sur le thread GUI.
 """
+import logging
 import time
 
 from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
@@ -38,8 +39,18 @@ from core.i18n import t
 from features.macro_pixel.key_names import pynput_key_to_pydirectinput
 from features.macro_simple.macro_simple import ACTION_KEY, ACTION_MOUSE
 
+logger = logging.getLogger("zenkaiontop.macro_simple")
+
 _LISTENING_STYLE = "QPushButton { color: #17B897; border-color: #17B897; }"
 _IGNORE_CLICKS_AFTER_START_S = 0.2
+# Après la fin d'une écoute (capture réussie OU annulation), un clic natif
+# Qt sur CE bouton reste ignoré pendant cette fenêtre — voir
+# mousePressEvent/mouseReleaseEvent ci-dessous pour le bug précis que ça
+# corrige (boucle "LButton"/n'importe quelle valeur qui rouvre aussitôt
+# l'écoute). Même ordre de grandeur que
+# _SUPPRESS_CONTEXT_MENU_AFTER_RIGHT_CLICK_S, même famille de problème
+# (évènement Qt natif qui arrive après un traitement pynput déjà terminé).
+_SUPPRESS_NATIVE_CLICK_AFTER_STOP_S = 0.3
 # Un clic droit qui capture "RButton" est aussi, séparément, ce qui déclenche
 # WM_CONTEXTMENU sous Windows au RELÂCHEMENT du bouton — un évènement Qt natif
 # distinct et légèrement POSTÉRIEUR au clic lui-même déjà traité par pynput
@@ -100,6 +111,15 @@ class ActionCaptureWidget(QPushButton):
         self._listen_started_at = 0.0
         self._right_click_captured_at = 0.0
         self._self_global_rect = QRect()
+        # Valeur de repli si _stop_listeners() était jamais appelée sans
+        # _start_listening() préalable (n'arrive pas en pratique, tous les
+        # appelants sont gardés par self._listening) : la politique de focus
+        # par défaut d'un QPushButton, jamais NoFocus.
+        self._focus_policy_before_listening = self.focusPolicy()
+        # Voir mousePressEvent/mouseReleaseEvent : fenêtre de temps pendant
+        # laquelle un clic natif Qt sur CE bouton est ignoré, juste après la
+        # fin d'une écoute.
+        self._native_click_blocked_until = 0.0
 
         self.clicked.connect(self._start_listening)
         self._captured.connect(self._on_captured)
@@ -173,10 +193,79 @@ class ActionCaptureWidget(QPushButton):
             self.cancel_listening()
         super().focusOutEvent(event)
 
+    def mousePressEvent(self, event) -> None:
+        # Racine du bug "boucle LButton" (voir historique/CLAUDE.md) : un
+        # clic RÉEL qui atterrit sur CE bouton pendant l'écoute est vu à LA
+        # FOIS par pynput (_on_click, global — capture ou annule, met fin à
+        # l'écoute) ET nativement par Qt (ce mousePressEvent/
+        # mouseReleaseEvent, TOUJOURS actifs quelle que soit la politique de
+        # focus — le clearFocus()/NoFocus de _start_listening ne bloque que
+        # le clavier, jamais la souris). Sans ce garde-fou, le relâchement de
+        # CE MÊME clic émet ensuite clicked() normalement côté Qt, qui
+        # relance _start_listening() — juste après que pynput ait déjà
+        # traité ce clic, donnant l'impression d'une réouverture immédiate
+        # et donc d'une boucle infinie dès qu'on reclique sur le bouton pour
+        # définir une valeur. self._listening peut déjà être retombé à False
+        # à ce stade (pynput tourne sur son propre thread, plus rapide que
+        # le passage par la file d'évènements Qt du signal _captured/
+        # _canceled) — d'où la fenêtre de temps supplémentaire
+        # (_native_click_blocked_until) après la fin de l'écoute, pas
+        # seulement pendant.
+        blocked = self._listening or time.monotonic() < self._native_click_blocked_until
+        logger.debug(
+            "mousePressEvent: listening=%s blocked_until_active=%s -> %s",
+            self._listening, time.monotonic() < self._native_click_blocked_until,
+            "avalé" if blocked else "transmis",
+        )
+        if blocked:
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        blocked = self._listening or time.monotonic() < self._native_click_blocked_until
+        logger.debug(
+            "mouseReleaseEvent: listening=%s blocked_until_active=%s -> %s",
+            self._listening, time.monotonic() < self._native_click_blocked_until,
+            "avalé" if blocked else "transmis",
+        )
+        if blocked:
+            return
+        super().mouseReleaseEvent(event)
+
     # ------------------------------------------------------------------
     def _start_listening(self) -> None:
+        logger.debug("_start_listening: listening avant appel=%s", self._listening)
         if self._listening:
             return
+        # Retire le focus Qt (et empêche d'en reprendre) AVANT de marquer
+        # l'écoute active, PAS après (essayé d'abord, voir historique) :
+        # clearFocus() ci-dessous déclenche synchronement focusOutEvent, qui
+        # annule l'écoute dès qu'il la voit active (self._listening déjà à
+        # True) — se retirer le focus À SOI-MÊME annulerait donc
+        # immédiatement l'écoute qu'on est en train de démarrer si l'ordre
+        # était inversé (vérifié : l'écoute se terminait aussitôt commencée,
+        # ET les écouteurs pynput créés juste après restaient orphelins,
+        # jamais arrêtés).
+        #
+        # Contrairement à KeyCaptureWidget (qui capture localement via ses
+        # propres keyPressEvent/mousePressEvent, jamais transmis à super()),
+        # ce widget capture globalement via pynput SANS jamais toucher aux
+        # gestionnaires d'évènements Qt natifs — un QPushButton qui garde le
+        # focus reste donc pleinement actif côté Qt PENDANT l'écoute :
+        # Key_Space sur un bouton focusé déclenche l'activation native du
+        # bouton (clicked()) à SON relâchement, un évènement Qt distinct et
+        # postérieur à la capture pynput déjà effectuée sur LA MÊME pression
+        # — ce clicked() tardif relance _start_listening(), écrasant la
+        # valeur tout juste appliquée (symptôme : "Espace" capturé puis
+        # aussitôt annulé). Sans focus, ce bouton ne peut plus recevoir le
+        # moindre évènement clavier natif, quel qu'il soit — la capture
+        # réelle continue de fonctionner normalement puisqu'elle ne dépend
+        # jamais du focus Qt (pynput écoute au niveau du système). Politique
+        # de focus restaurée dans _stop_listeners().
+        self._focus_policy_before_listening = self.focusPolicy()
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.clearFocus()
+
         self._listening = True
         self._listen_started_at = time.monotonic()
         # Pris ici (thread GUI) une fois pour toutes : _on_click tourne sur
@@ -199,9 +288,11 @@ class ActionCaptureWidget(QPushButton):
         if name is None:
             return
         if name == "esc":
+            logger.debug("_on_key_press [thread pynput]: Echap -> annulation")
             self._listening = False
             self._canceled.emit()
             return
+        logger.debug("_on_key_press [thread pynput]: capture clavier %r", name)
         self._listening = False
         self._captured.emit(ACTION_KEY, name, 0, 0)
 
@@ -209,8 +300,17 @@ class ActionCaptureWidget(QPushButton):
         if not self._listening or not pressed:
             return
         if time.monotonic() - self._listen_started_at < _IGNORE_CLICKS_AFTER_START_S:
+            logger.debug(
+                "_on_click [thread pynput]: ignoré (dans _IGNORE_CLICKS_AFTER_START_S) bouton=%s pos=(%s,%s)",
+                button, x, y,
+            )
             return
-        if self._self_global_rect.contains(QPoint(int(x), int(y))):
+        in_self_rect = self._self_global_rect.contains(QPoint(int(x), int(y)))
+        logger.debug(
+            "_on_click [thread pynput]: bouton=%s pos=(%s,%s) self_rect=%s contains=%s",
+            button, x, y, self._self_global_rect, in_self_rect,
+        )
+        if in_self_rect:
             # Un clic sur CE bouton "Définir" pendant que sa propre capture
             # est déjà en cours annule simplement l'écoute, plutôt que de
             # capturer ce clic comme l'action — un clic ici n'a jamais de
@@ -228,26 +328,43 @@ class ActionCaptureWidget(QPushButton):
             self._listening = False
             self._canceled.emit()
             return
+        logger.debug("_on_click [thread pynput]: capture souris %r pos=(%s,%s)", name, x, y)
         self._listening = False
         if name == "right":
             self._right_click_captured_at = time.monotonic()
         self._captured.emit(ACTION_MOUSE, name, x, y)
 
     def _on_captured(self, action: str, value: str, x: int, y: int) -> None:
+        logger.debug("_on_captured [thread GUI]: action=%r value=%r pos=(%s,%s)", action, value, x, y)
         self._stop_listeners()
         self.set_action(action, value, x, y)
 
     def _on_canceled(self) -> None:
+        logger.debug("_on_canceled [thread GUI]")
         self._stop_listeners()
         self._refresh_text()
 
     def _stop_listeners(self) -> None:
+        logger.debug("_stop_listeners [thread GUI]")
         if self._kb_listener is not None:
             self._kb_listener.stop()
             self._kb_listener = None
         if self._mouse_listener is not None:
             self._mouse_listener.stop()
             self._mouse_listener = None
+        # Repose la politique de focus normale (retirée dans
+        # _start_listening) : ce bouton redevient cliquable/focusable comme
+        # n'importe quel autre une fois l'écoute terminée.
+        self.setFocusPolicy(self._focus_policy_before_listening)
+        # Voir mousePressEvent/mouseReleaseEvent : le clic RÉEL qui vient de
+        # mettre fin à l'écoute (capturé ou annulé côté pynput) atteint
+        # aussi, séparément, ces gestionnaires Qt natifs — parfois
+        # légèrement APRÈS ce _stop_listeners() (l'ordre exact entre
+        # l'évènement souris natif et le signal en file d'attente venant du
+        # thread pynput n'est pas garanti). Bloque tout clic natif sur ce
+        # bouton pendant cette fenêtre, pour ne jamais rouvrir l'écoute à
+        # cause de CE MÊME clic physique.
+        self._native_click_blocked_until = time.monotonic() + _SUPPRESS_NATIVE_CLICK_AFTER_STOP_S
         self.setStyleSheet("")
 
     # ------------------------------------------------------------------

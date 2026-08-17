@@ -5,7 +5,7 @@ visuelle cohérente (une action principale par écran).
 """
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QLabel, QWidget
 
-from ui.info_badge import InfoBadge
+from ui.info_badge import InfoBadge, WarningBadge
 
 # Marge fixe (constante pour toutes les pages) entre le haut de la rangée
 # titre et le haut du badge "?". Essayé plusieurs approches "intelligentes"
@@ -31,11 +31,15 @@ class BasePage(QWidget):
         # au même niveau visuel que le titre plutôt que noyée plus bas.
         self._header_layout = QHBoxLayout()
         self._header_layout.setContentsMargins(0, 0, 0, 0)
-        # -30% (12 -> 8) puis -25% supplémentaires (8 -> 6) : écart entre la
-        # fin du texte du titre et le badge "?" (voir add_info_badge, inséré
-        # juste après le titre dans ce même layout) jugé trop large à chaque
-        # passe.
-        self._header_layout.setSpacing(6)
+        # -30% (12 -> 8) puis -25% (8 -> 6) puis -30% supplémentaires
+        # (6 -> 4) : écart entre la fin du texte du titre et le badge "?"
+        # (voir add_info_badge, inséré juste après le titre dans ce même
+        # layout) jugé trop large à chaque passe. Ce même spacing gouverne
+        # aussi l'écart entre le badge "?" et un éventuel badge bêta (voir
+        # add_beta_badge) — un seul réglage, uniforme par construction sur
+        # TOUS les enfants de ce layout, jamais deux valeurs qui pourraient
+        # diverger.
+        self._header_layout.setSpacing(4)
 
         self.title_label = QLabel(title)
         self.title_label.setProperty("class", "pageTitle")
@@ -82,6 +86,26 @@ class BasePage(QWidget):
         wrapper_layout.addStretch(1)
 
         self._header_layout.insertWidget(1, wrapper)
+
+    def add_beta_badge(self, tooltip_text: str) -> None:
+        """Insère un petit panneau de signalisation rouge ("!") juste après
+        le badge "?" (voir add_info_badge, à appeler AVANT celui-ci — la
+        position d'insertion, index 2, suppose le badge "?" déjà en index 1)
+        — même mécanique de bulle au survol, réservée à un avertissement
+        ponctuel (ex: "Fonctionnalité en bêta") plutôt qu'un texte
+        informatif neutre. Même espacement que titre<->badge "?" (le
+        spacing du header_layout est UNIFORME sur tous ses enfants, voir
+        __init__), jamais une valeur recalculée séparément."""
+        badge = WarningBadge(tooltip_text)
+
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, _BADGE_TOP_MARGIN, 0, 0)
+        wrapper_layout.setSpacing(0)
+        wrapper_layout.addWidget(badge)
+        wrapper_layout.addStretch(1)
+
+        self._header_layout.insertWidget(2, wrapper)
 
     def set_title(self, title: str) -> None:
         self.title_label.setText(title)

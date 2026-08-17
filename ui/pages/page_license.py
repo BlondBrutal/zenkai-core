@@ -34,6 +34,7 @@ _STATUS_COLORS = {
     LicenseStatus.VALID_OFFLINE_GRACE: _STATUS_COLOR_WARN,
     LicenseStatus.DEACTIVATED: _STATUS_COLOR_BLOCKED,
     LicenseStatus.NOT_FOUND: _STATUS_COLOR_BLOCKED,
+    LicenseStatus.ALREADY_USED: _STATUS_COLOR_BLOCKED,
     LicenseStatus.OFFLINE_EXPIRED: _STATUS_COLOR_BLOCKED,
     LicenseStatus.REGISTRY_ERROR: _STATUS_COLOR_WARN,
 }
@@ -45,6 +46,7 @@ class LicensePage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.license.title"), "", parent)
         self.add_info_badge(t("page.license.placeholder"))
+        self.add_beta_badge(t("app.beta_warning"))
 
         # Marge droite réduite (32 -> 16), comme la page Macro (référence) :
         # cohérence de largeur de contenu entre toutes les pages (voir aussi
@@ -214,7 +216,7 @@ class LicensePage(BasePage):
             return
 
         self._set_status_text(self._build_status_message(result), _STATUS_COLORS.get(result.status))
-        if result.status in (LicenseStatus.DEACTIVATED, LicenseStatus.NOT_FOUND):
+        if result.status in (LicenseStatus.DEACTIVATED, LicenseStatus.NOT_FOUND, LicenseStatus.ALREADY_USED):
             self.error_label.setText(self._contact_hint_text())
         else:
             self.error_label.setText("")
@@ -235,6 +237,8 @@ class LicensePage(BasePage):
             return t("page.license.status_deactivated")
         if result.status == LicenseStatus.NOT_FOUND:
             return t("page.license.status_not_found")
+        if result.status == LicenseStatus.ALREADY_USED:
+            return t("page.license.status_already_used")
         if result.status == LicenseStatus.OFFLINE_EXPIRED:
             return t("page.license.status_offline_expired")
         return t("page.license.status_registry_error")

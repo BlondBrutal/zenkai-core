@@ -11,10 +11,10 @@ proprement widget par widget. On affiche donc nous-mêmes un petit popup
 avec un délai court et décalé en diagonale du curseur.
 """
 from PyQt6.QtCore import QPoint, Qt, QTimer
-from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QLabel, QWidget
 
-from ui.status_colors import STATUS_OK
+from ui.status_colors import STATUS_CRITICAL, STATUS_OK
 
 _SIZE = 20
 _SHOW_DELAY_MS = 150
@@ -119,3 +119,78 @@ class InfoBadge(QWidget):
         font.setWeight(font.Weight.Bold)
         painter.setFont(font)
         painter.drawText(circle_rect, Qt.AlignmentFlag.AlignCenter, "?")
+
+
+class WarningBadge(QWidget):
+    """Petit panneau de signalisation (triangle rouge, "!") juste après
+    InfoBadge : même mécanique de bulle au survol (bulle PARTAGÉE — voir
+    _shared_bubble ci-dessus, un seul popup à la fois pour toute l'app,
+    donc pas de conflit si les deux badges se survolent l'un après
+    l'autre), réservé à un avertissement ponctuel ("Fonctionnalité en
+    bêta...") plutôt qu'un texte informatif neutre comme InfoBadge — d'où
+    une forme et une couleur volontairement différentes (triangle rouge
+    d'alerte, pas cercle turquoise)."""
+
+    def __init__(self, tooltip_text: str, size: int = _SIZE, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self._tooltip_text = tooltip_text
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._color = QColor(STATUS_CRITICAL)
+
+        self._show_timer = QTimer(self)
+        self._show_timer.setSingleShot(True)
+        self._show_timer.setInterval(_SHOW_DELAY_MS)
+        self._show_timer.timeout.connect(self._show_bubble)
+
+    def enterEvent(self, event) -> None:
+        self._show_timer.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._show_timer.stop()
+        _shared_bubble().hide()
+        super().leaveEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self._show_timer.stop()
+        _shared_bubble().hide()
+        super().hideEvent(event)
+
+    def _show_bubble(self) -> None:
+        _shared_bubble().show_at(QCursor.pos(), self._tooltip_text)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        rect = self.rect()
+        margin = max(1.0, self.width() * 0.075)
+        inner = rect.toRectF().adjusted(margin, margin, -margin, -margin)
+
+        # Triangle pointe en haut (forme standard d'un panneau de danger),
+        # coins légèrement arrondis (jointures rondes du contour) pour
+        # rester cohérent avec le rendu doux du reste de l'app plutôt qu'un
+        # triangle à arêtes vives.
+        path = QPainterPath()
+        path.moveTo(inner.center().x(), inner.top())
+        path.lineTo(inner.right(), inner.bottom())
+        path.lineTo(inner.left(), inner.bottom())
+        path.closeSubpath()
+
+        pen = QPen(self._color, max(1.0, self.width() * 0.075))
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+        painter.setPen(self._color)
+        font = painter.font()
+        font.setPixelSize(max(8, round(self.width() * 0.5)))
+        font.setWeight(font.Weight.Bold)
+        painter.setFont(font)
+        # Légèrement décalé vers le bas (pas AlignCenter pur) : le triangle
+        # laisse moins de place en haut qu'en bas, un "!" parfaitement
+        # centré sur le rectangle englobant paraît trop haut dans la forme.
+        text_rect = inner.adjusted(0, inner.height() * 0.15, 0, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, "!")

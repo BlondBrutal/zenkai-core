@@ -95,6 +95,84 @@ Fix (voir `MainWindow.reload_language()`) :
    qu'un state persiste volontairement après `hide()`, lui ajouter ce
    même `shutdown()` plutôt que de repartir de zéro sur le diagnostic.
 
+## Architecture : verrouillage de licence "1 clé = 1 appareil"
+
+La vérification de licence (`features/license/`) ne lit plus jamais le Gist
+GitHub de licences directement depuis l'app : elle passe par un **Worker
+Cloudflare** (`cloudflare-worker/worker.js`, gratuit, à déployer séparément
+— voir plus bas) qui sert de relais. Raison : une vérification purement
+côté client (l'ancienne version, un simple `GET` sur l'URL brute du Gist)
+est **contournable** — n'importe qui peut patcher l'exécutable ou rejouer
+la réponse HTTP pour se faire passer pour une clé active. Le verrouillage
+"1 clé = 1 appareil" (empêcher qu'une même clé serve sur plusieurs PC) est
+donc décidé **côté serveur**, jamais côté client :
+
+- `features/license/hardware_id.py::get_hardware_id()` calcule un
+  identifiant stable de la machine à partir du **MachineGuid Windows**
+  (`HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid`, généré une seule
+  fois à l'installation de Windows) — **jamais l'IP ou l'adresse MAC**,
+  qui changent selon le réseau/le matériel. Seul un hash SHA-256 de ce
+  GUID est envoyé au serveur, jamais le GUID brut.
+- `features/license/license_manager.py::check_key_online()` envoie un
+  `POST /activate` avec `{ "key": ..., "hardware_id": ... }` au Worker
+  (URL configurée dans `config/license_config.json::activate_url`) au
+  lieu de lire le registre directement.
+- Le Worker (voir `cloudflare-worker/worker.js`) lit/écrit le Gist via
+  l'API GitHub avec un **token stocké en secret Cloudflare**, jamais
+  exposé au client. Décision : clé absente -> `not_found` ; `actif=false`
+  -> `deactivated` ; pas encore de `hardware_id` enregistré sur cette
+  entrée -> première activation, l'enregistre (`PATCH` du Gist) et renvoie
+  `valid` ; `hardware_id` déjà enregistré et identique -> `valid` (même
+  appareil qui revérifie) ; `hardware_id` déjà enregistré et différent ->
+  `already_used` (bloqué, un autre appareil a déjà cette clé).
+- `LicenseStatus.ALREADY_USED` (nouveau statut, `ui/pages/page_license.py`)
+  affiche un message distinct de `NOT_FOUND`/`DEACTIVATED` — clé qui existe
+  et est active, mais verrouillée sur un autre appareil.
+- La grâce hors-ligne de 3 jours côté client (`_check_offline_grace`,
+  `config/license_config.json::grace_days`) est inchangée : si le Worker
+  est injoignable et qu'une clé locale valide a déjà été vérifiée dans les
+  3 derniers jours, l'app reste débloquée sans réseau. Une réponse
+  **définitive** du serveur (`not_found`/`deactivated`/`already_used`)
+  efface au contraire tout de suite le cache local (`clear_license()`) —
+  aucune grâce hors-ligne ne doit survivre à un refus explicite.
+
+**Débloquer manuellement un ami qui change de PC** : son ancien
+`hardware_id` reste verrouillé sur son entrée du Gist après un changement
+de machine — éditer directement le Gist (bouton "Edit" sur la page du
+Gist, https://gist.github.com/BlondBrutal/...) et remettre
+`"hardware_id": null` sur son entrée (garder `"actif": true` inchangé).
+Sa prochaine vérification (lancement de l'app ou bouton "Revérifier")
+verrouillera automatiquement son nouveau `hardware_id`.
+
+**Déploiement du Worker** (gratuit, compte Cloudflare personnel de
+l'utilisateur — jamais fait par Claude Code, accès à un compte tiers) :
+1. Créer un compte sur https://dash.cloudflare.com/sign-up (gratuit, le
+   plan "Workers Free" suffit largement pour ce volume de requêtes).
+2. Dans le dashboard : "Workers & Pages" -> "Create" -> "Create Worker" ->
+   lui donner un nom (ex: `zenkai-license-relay`) -> "Deploy" (déploie un
+   Worker vide d'abord, normal).
+3. "Edit code" (éditeur en ligne) -> remplacer tout le contenu par celui
+   de `cloudflare-worker/worker.js` de ce dépôt -> "Deploy".
+4. Dans les réglages du Worker : "Settings" -> "Variables and Secrets" ->
+   "Add" :
+   - `GITHUB_TOKEN` : cocher "Encrypt" (secret) — un token GitHub avec la
+     permission **"gist"** uniquement (Settings -> Developer settings ->
+     Personal access tokens -> Fine-grained tokens, ou un classic token
+     avec le scope `gist`), jamais un token avec des permissions plus
+     larges que nécessaire.
+   - `GIST_ID` : variable normale (pas besoin de chiffrer) — l'identifiant
+     dans l'URL du Gist (ex: `2d05f981baa371e93727e2d773865ccc`).
+   - `GIST_FILENAME` : variable normale — le nom du fichier JSON dans le
+     Gist (ex: `zenkai_licenses.json`).
+5. Copier l'URL du Worker affichée dans le dashboard (ex:
+   `https://zenkai-license-relay.<ton-compte>.workers.dev`) et la coller
+   dans `config/license_config.json::activate_url`, en ajoutant `/activate`
+   à la fin.
+6. Tester avec `curl` ou Postman : `POST` sur cette URL avec un body
+   `{"key": "ZK-XXXX-XXXX-XXXX", "hardware_id": "test"}` doit répondre
+   `{"status": "valid", "nom": "..."}` (ou `not_found` si la clé n'existe
+   pas dans le Gist).
+
 ## Architecture : Custom Script / interpréteur AutoHotkey
 
 La page Custom Script (`ui/pages/page_custom_script.py`,
@@ -155,6 +233,130 @@ Précision pour ne pas confondre avec un bug déjà rencontré : ceci n'a
 (auto-élévation persistante). Ici, la tâche est un lanceur ponctuel pour UN
 SEUL process enfant, au niveau LUA (dé-élevé, pas élevé), supprimée en
 quelques secondes — sans rapport avec la séquence de démarrage de l'app.
+
+## Architecture : Fleasion (remplacement d'assets Roblox)
+
+La page Fleasion (`ui/pages/page_fleasion.py`, `features/fleasion/`) gère
+des presets de substitution d'assets Roblox (textures/sons/meshes) via
+**Fleasion** (https://github.com/fleasion/Fleasion, GPL-3.0) — une appli
+tray + proxy local qui s'intercale entre Roblox et son CDN, sans jamais
+modifier les fichiers du jeu ni injecter de code. Contrairement à
+AutoHotkey (Custom Script), un preset Fleasion est une liste STRUCTURÉE de
+règles (Asset ID -> ID/URL/fichier local/suppression), jamais du code
+arbitraire — **pas d'analyse heuristique de sécurité** pour cette page,
+volontairement.
+
+**Différence structurelle majeure avec AutoHotkey** (recherchée via
+WebSearch/WebFetch sur le dépôt GitHub et fleasion.com avant
+implémentation, PAS de documentation officielle CLI trouvée) : Fleasion
+n'a **aucun mode CLI/headless** — c'est une appli tray unique qui charge
+elle-même, à son propre démarrage, tous les fichiers JSON présents dans
+`%LocalAppData%\FleasionNT\configs\`. Zenkai Core ne "lance" donc jamais un
+preset précis comme un script AHK : il **dépose/retire des fichiers** dans
+ce dossier (`features/fleasion/config_writer.py`, toujours dans un
+sous-dossier dédié `configs\ZenkaiCore\`, jamais à la racine — pour ne
+jamais toucher aux profils que l'utilisateur aurait créés lui-même via le
+Dashboard Fleasion), et lance/arrête séparément le process `Fleasion.exe`
+lui-même (`features/fleasion/process_manager.py`), PARTAGÉ entre tous les
+presets actifs (un seul process, jamais un par preset comme pour AHK) —
+comptage de références tenu dans `ui/pages/page_fleasion.py::FleasionPage`
+(`_active_entry_ids`) : le process ne démarre qu'au premier preset activé,
+ne s'arrête qu'au dernier qui repasse OFF.
+
+**Le coupe-circuit global "Fleasion actif" NE tue PAS le process** —
+différence assumée avec `custom_scripts_globally_enabled`/
+`macros_globally_enabled` (qui arrêtent tout ce qui tourne) : OFF réécrit
+seulement Statut=Off sur toutes les règles déployées de nos presets actifs
+(`config_writer.undeploy_preset`), sans jamais toucher au process
+`Fleasion.exe` — l'utilisateur peut aussi s'en servir pour des presets
+créés hors de cette page, qu'un OFF depuis Zenkai Core ne doit pas
+interrompre. C'est le toggle "Actif" **par preset**, dans la Bibliothèque
+(mécanique équivalente au Start/Stop par script d'AutoHotkey), qui
+lance/arrête réellement le process partagé — journalisé dans
+`core/security_log.py::Category.EXTERNAL_EXECUTION` (catégorie déjà
+existante, réutilisée telle quelle, pas de nouvelle catégorie créée).
+
+**CAVEAT IMPORTANT — schéma JSON non vérifié** : le format exact du fichier
+déployé (`config_writer._to_fleasion_json`, noms de champs `assetIds`/
+`mode`/`replaceWith`/`status`/`name`) est construit À VUE de la
+documentation publique (Asset ID(s)/Replace With/Status/Name/Mode, décrits
+en langage naturel sur fleasion.com et dans le README GitHub), **jamais
+vérifié contre un vrai fichier JSON exporté par une installation réelle**
+(aucun exemple disponible au moment de l'implémentation). Toute la
+traduction est isolée dans cette seule fonction — si les vrais noms de
+champs diffèrent une fois testés en conditions réelles, c'est la SEULE
+fonction à corriger. Ne jamais supposer ce schéma fiable sans l'avoir
+vérifié soi-même contre une vraie installation Fleasion au préalable.
+
+**Détection/embarquement** (`features/fleasion/fleasion_detect.py`), même
+priorité qu'`ahk_detect.py` (copie embarquée d'abord, repli système
+ensuite) mais deux différences : nom de fichier **versionné**
+(`Fleasion*.exe` via `glob.glob`, pas un nom fixe comme `AutoHotkey64.exe`)
+et repli système **best-effort** (aucun registre Windows documenté pour
+Fleasion, contrairement à `HKLM/HKCU\SOFTWARE\AutoHotkey` — chemins
+usuels `%LocalAppData%\Programs\Fleasion\`/`%ProgramFiles%\Fleasion\` +
+`shutil.which`, à ajuster si l'installeur officiel diffère). **Le vrai
+binaire Windows (`assets/runtime/fleasion/Fleasion*.exe`) et sa licence
+GPL-3.0 en texte n'ont PAS été embarqués par Claude** (impossible de
+télécharger/embarquer un vrai binaire externe depuis une session d'agent) —
+à déposer manuellement depuis
+https://github.com/fleasion/Fleasion/releases, exactement comme
+`assets/runtime/ahk/` a été peuplé à l'origine pour AutoHotkey.
+
+Stockage des presets (`features/fleasion/preset_store.py`) : un fichier
+`.zkfleasion` (JSON) par preset sous
+`core.paths.get_fleasion_presets_dir()`, plus un sous-dossier `<id>/assets/`
+(nommé d'après l'id, JAMAIS le nom slugifié — un renommage du preset ne
+doit jamais casser le chemin vers ses fichiers déjà importés) pour les
+fichiers "Local" (texture/son/mesh) choisis via `QFileDialog`. Export/Import
+utilisent un **ZIP** (`.zip`, pas une copie JSON brute comme le `.zkscript`
+d'AutoHotkey) : un preset Fleasion combine intrinsèquement des règles ET des
+fichiers locaux, qu'un JSON seul ne peut pas transporter sans casser les
+références "Local" une fois réimporté ailleurs.
+
+## Suite de tests automatisés (pytest)
+
+`pytest` (voir `requirements-dev.txt`) couvre toute la logique pure/
+sérialisation testable sans interaction manuelle : configs macros
+(`.zkmacro`, Simple et Pixel), Fast Flags (`ClientAppSettings.json` +
+presets), heuristiques Custom Script, traduction de touches (`key_names.py`),
+détection de jeu, calcul de risque/bottleneck/cartes de statut Performance,
+obfuscation de licence, i18n, config statique/persistante, et tous les
+gestionnaires de process (`process_manager.py` de Custom Script/Fleasion).
+Windows/psutil/pydirectinput/pynput sont TOUJOURS mockés — jamais un vrai
+process lancé, jamais le vrai registre/`%APPDATA%` touché (chemins
+redirigés vers `tmp_path` via `monkeypatch`). Le verrouillage de licence
+"1 clé = 1 appareil" (`test_license_manager.py`, `test_hardware_id.py`) est
+couvert avec un faux serveur HTTP local (stdlib `http.server`, reproduit la
+décision de `cloudflare-worker/worker.js`) et un `MachineGuid` mocké —
+jamais un vrai appel réseau au Worker Cloudflare ni une vraie lecture du
+registre Windows.
+
+Lancer la suite : `pytest` (ou `python -m pytest`) depuis la racine du dépôt
+— `tests/conftest.py` force `QT_QPA_PLATFORM=offscreen` automatiquement
+(plusieurs modules testés importent PyQt6 pour ses enums/types sans jamais
+ouvrir de fenêtre), `pytest.ini` déclare `testpaths = tests`. Compatible
+avec l'ancienne suite `unittest.TestCase` déjà en place (pytest exécute les
+deux styles indifféremment dans le même run).
+
+**Non automatisable** (nécessite une vraie session Windows/Qt/Roblox, à
+tester manuellement) : tout `ui/` (widgets/pages/overlays Qt réels),
+`features/cursor/win_cursor.py`/`roblox_overlay.py`/`crosshair_overlay.py`
+(vraie manipulation de curseur système, vrais overlays toujours au-dessus),
+`features/macro_simple/player.py`/`hotkey_listener.py`/`native_key_blocker.py`
+et `features/macro_pixel/pixel_watcher.py`/`key_swap_listener.py` (vraie
+simulation/écoute clavier-souris globale — dangereux à exécuter en CI),
+`features/performance/live_monitor.py`/`fps_monitor.py`/`ping_monitor.py`
+(vraie mesure CPU/GPU/réseau, PresentMon), `features/performance/fixes.py`
+(vraies écritures registre/service Windows), le vrai lancement dé-élevé via
+le Planificateur de tâches (`deelevate.py`, déjà testé avec la chaîne COM
+mockée — seul le VRAI comportement, niveau d'intégrité du process lancé,
+reste manuel), le vrai scan Windows Defender, le vrai appel réseau au
+Worker Cloudflare/Gist de licences (`cloudflare-worker/worker.js` lui-même,
+JavaScript, hors du périmètre de `pytest` — à tester via `curl`/Postman
+une fois déployé, voir la section licence plus haut), et le vrai
+lancement/détection de Roblox et de l'exécutable Fleasion (jamais
+embarqué, voir plus haut).
 
 ## Design system — Zenkai Core
 
@@ -224,12 +426,27 @@ réserver un espace de `12px` entre son propre bord droit et la barre —
 jamais un contenu collé directement contre elle. Règle centralisée dans
 `ui/scrollbar_style.py` (`CONTENT_SCROLLBAR_GAP`, jamais une valeur en dur
 recopiée page par page) :
-- `QScrollArea` "nue" (conteneur de page/onglet) : utiliser
-  `scrollarea_gap_qss()` dans son propre `setStyleSheet("QScrollArea { ...
-  " + scrollarea_gap_qss() + " }")`. **Jamais** un `margin` QSS posé sur la
-  `QScrollBar` elle-même — vérifié sans aucun effet (ni horizontal ni
-  vertical) — c'est la `QScrollArea` qu'il faut rogner via `padding`,
-  viewport ET scrollbar se déplaçant ensemble.
+- `QScrollArea` "nue" (conteneur de page/onglet) : appeler
+  `apply_viewport_scrollbar_gap(scroll_area)` juste après `setWidget(...)` —
+  **la même fonction/API que pour un widget à scrollbar interne ci-dessous**
+  (`QScrollArea` est, elle aussi, un `QAbstractScrollArea`). **Jamais** un
+  `margin` QSS posé sur la `QScrollBar` elle-même — vérifié sans aucun effet
+  (ni horizontal ni vertical). Et surtout : **jamais non plus** un
+  `padding-right` QSS posé sur la `QScrollArea` elle-même
+  (`scrollarea_gap_qss()`, ancienne approche ici, retirée) — piège vérifié
+  par mesure directe de géométrie (page Macro puis Performance, toutes deux
+  concernées) : sur une `QScrollArea` nue, ce padding rogne tout le bloc
+  viewport+scrollbar DEPUIS le bord droit AVANT qu'ils ne se partagent cet
+  espace entre eux, donc le vide obtenu apparaît APRÈS la scrollbar (entre
+  elle et le bord de la fenêtre/carte), jamais AVANT (entre le contenu et
+  elle) — contenu et scrollbar restent accolés malgré ce padding, symptôme
+  exact d'un contenu qui "touche" la barre malgré la règle en apparence bien
+  appliquée. Seul `setViewportMargins` (via `apply_viewport_scrollbar_gap`)
+  rétrécit réellement le viewport lui-même, indépendamment de la position de
+  la scrollbar — un `padding-top`/`padding-bottom` QSS reste, lui, valide
+  pour un inset vertical (voir page_performance.py) : viewport et scrollbar
+  partagent alors le MÊME espace au lieu d'être côte à côte, donc pas le
+  même effet de bord.
 - Tout widget à scrollbar INTERNE (`QListWidget`, `QTableWidget`,
   `QPlainTextEdit`... — tous des `QAbstractScrollArea`) : appeler
   `apply_viewport_scrollbar_gap(widget)` juste après sa création, qui pose

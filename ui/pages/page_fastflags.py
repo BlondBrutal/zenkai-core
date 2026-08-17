@@ -16,14 +16,14 @@ confirmation par popup, devenue inutile puisqu'aucun clic accidentel ne peut
 plus écraser la config en cours).
 
 Bootstrapper Roblox (voir features/fastflags/launcher.py et protocol.py) :
-il n'y a plus de bouton "Appliquer" qui écrit une fois pour toutes — à la
-place, "Lancer Roblox" (_on_launch_clicked) injecte le contenu du tableau
-dans le vrai ClientAppSettings.json PUIS lance RobloxPlayerBeta.exe, et
-cette même injection se reproduit à CHAQUE lancement (y compris via le
-protocole roblox-player:// intercepté, sans que cette page soit ouverte) —
-voir la configuration "active" persistée par le launcher, garantissant que
-les flags choisis survivent même si Roblox modifie le fichier entre deux
-lancements.
+pas de bouton "Lancer Roblox"/"Fermer Roblox" dans cette page (retirés,
+Roblox se lance normalement depuis le site/l'app Roblox) — "Enregistrer"
+(_on_save_preset) sauvegarde le tableau comme preset nommé dans la
+Bibliothèque ET écrit la configuration "active" (get_fastflags_active_config_path)
+que le protocole roblox-player:// intercepté réinjecte dans le vrai
+ClientAppSettings.json à CHAQUE vrai lancement de Roblox, même sans que
+cette page/l'app soit ouverte — c'est cette action qui rend un preset
+"celui qui s'applique désormais", pas un simple lancement.
 
 show_recommendation() reste le point d'accroche utilisé par la page
 Performance (bouton "Optimiser pour Roblox" → bottleneck détecté → preset
@@ -45,7 +45,6 @@ from core.config import config
 from core.i18n import t
 from core.paths import get_fastflags_active_config_path
 from features.fastflags import launcher, protocol
-from features.fastflags.roblox_control import kill_roblox
 from features.fastflags.manager import (
     PRESETS, delete_custom_preset, detect_active_preset, detect_value_type,
     export_flags_file, get_known_flags, import_flags_file, list_custom_presets,
@@ -129,21 +128,21 @@ _VALUE_COL_WIDTH = 118
 _TYPE_COL_WIDTH = 70
 _DELETE_COL_WIDTH = 46
 
-# Boutons Lancer Roblox/Enregistrer/Réinitialiser : hauteur et padding
-# horizontal laissés au défaut standard d'AnimatedButton (voir
-# ui/animated_button.py — même taille que partout ailleurs dans l'app,
-# volontairement, pour rester cohérent avec les autres pages), seule la
-# taille de police reste forcée ici. AnimatedButton peint son texte en 10pt
-# par défaut (~13.3px à 96 DPI seulement — un écart fractionnaire qui
-# grandit sous une mise à l'échelle DPI non standard) : _ACTION_BTN_FONT_SIZE
-# force un vrai pixel size de 13, identique à la police QSS des boutons du
-# haut de page ("Ajouter un flag"/"Parcourir les flags",
-# QPushButton.secondaryButton, "font-size: 13px" dans theme.qss).
+# Boutons Enregistrer/Réinitialiser : hauteur et padding horizontal laissés
+# au défaut standard d'AnimatedButton (voir ui/animated_button.py — même
+# taille que partout ailleurs dans l'app, volontairement, pour rester
+# cohérent avec les autres pages), seule la taille de police reste forcée
+# ici. AnimatedButton peint son texte en 10pt par défaut (~13.3px à 96 DPI
+# seulement — un écart fractionnaire qui grandit sous une mise à l'échelle
+# DPI non standard) : _ACTION_BTN_FONT_SIZE force un vrai pixel size de 13,
+# identique à la police QSS des boutons du haut de page ("Ajouter un
+# flag"/"Parcourir les flags", QPushButton.secondaryButton, "font-size:
+# 13px" dans theme.qss).
 _ACTION_BTN_FONT_SIZE = 13
 # Même écart que celui entre "Ajouter un flag"/"Parcourir les flags" (voir
-# top_row.setSpacing(8) dans _build_editor_column) : les 3 boutons du bas
-# (Lancer Roblox/Enregistrer/Réinitialiser) sont maintenant groupés
-# ensemble, donc cohérents avec l'écart déjà utilisé en haut de page.
+# top_row.setSpacing(8) dans _build_editor_column) : les boutons du bas
+# (Enregistrer/Réinitialiser) restent cohérents avec l'écart déjà utilisé
+# en haut de page.
 _ACTION_GAP = 8
 
 # Même couleur que le fond général de l'app (QMainWindow, QWidget#centralWidget
@@ -528,6 +527,7 @@ class FastFlagsPage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.fastflags.title"), "", parent)
         self.add_info_badge(t("page.fastflags.placeholder"))
+        self.add_beta_badge(t("app.beta_warning"))
 
         # Kill switch global, même emplacement/principe que "Macros actives"
         # sur la page Macro (voir MacroPage._build_kill_switch_control) : au
@@ -658,9 +658,10 @@ class FastFlagsPage(BasePage):
             # Avertissement AVANT d'écrire dans le registre (catégorie
             # sensible PROTOCOL_HANDLER, voir core/security_log.py) : ce
             # toggle est un changement de configuration ponctuel et
-            # explicite, pas le chemin de lancement du jeu (celui-ci — bouton
-            # "Lancer Roblox"/protocole — reste volontairement sans friction,
-            # voir la docstring de features/fastflags/launcher.py). Annuler
+            # explicite, pas le chemin de lancement du jeu lui-même (celui-ci
+            # — protocole roblox-player:// — reste volontairement sans
+            # friction, voir la docstring de features/fastflags/launcher.py).
+            # Annuler
             # revient au switch décoché SANS ré-émettre "toggled" (voir
             # ToggleSwitch.setChecked), donc sans boucle.
             if not show_confirm(
@@ -797,32 +798,17 @@ class FastFlagsPage(BasePage):
         # _fix_header_and_scrollbar.
         self._fix_header_and_scrollbar()
 
-        # "Lancer Roblox" — remplace l'ancien "Appliquer" : ce n'est plus une
-        # simple écriture disque, c'est l'action principale de la page
-        # (injecte les Fast Flags puis lance le jeu, voir
-        # _on_launch_clicked), mais même style neutre (contour fin, pas de
-        # remplissage plein) que "Enregistrer"/"Réinitialiser" — pas de mise
-        # en avant particulière. Les 3 boutons sont groupés ensemble en bas
-        # à droite (stretch en tête, pas entre eux), écart IDENTIQUE à celui
-        # du haut de page entre "Ajouter un flag"/"Parcourir les flags"
-        # (_ACTION_GAP, via setSpacing).
+        # "Enregistrer" — remplace l'ancien "Appliquer" : sauvegarde un
+        # preset nommé dans la Bibliothèque ET écrit la configuration
+        # active que le protocole roblox-player:// réappliquera au prochain
+        # vrai lancement de Roblox (voir _on_save_preset) — plus de bouton
+        # "Lancer Roblox"/"Fermer Roblox" dans cette page (retirés). Les 2
+        # boutons restants sont groupés ensemble en bas à droite (stretch en
+        # tête, pas entre eux), écart IDENTIQUE à celui du haut de page entre
+        # "Ajouter un flag"/"Parcourir les flags" (_ACTION_GAP, via setSpacing).
         action_row = QHBoxLayout()
         action_row.setSpacing(_ACTION_GAP)
         action_row.addStretch(1)
-        self.launch_btn = AnimatedButton(
-            t("page.fastflags.launch_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
-        )
-        self.launch_btn.clicked.connect(self._on_launch_clicked)
-        action_row.addWidget(self.launch_btn)
-        # "Kill Roblox" : termine instantanément le process s'il tourne déjà
-        # (voir features/fastflags/roblox_control.py) — entre "Lancer
-        # Roblox" et "Enregistrer" (pas après), pour rester à côté de
-        # l'action à laquelle il se rapporte le plus directement.
-        self.kill_btn = AnimatedButton(
-            t("page.fastflags.kill_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
-        )
-        self.kill_btn.clicked.connect(self._on_kill_clicked)
-        action_row.addWidget(self.kill_btn)
         self.save_preset_btn = AnimatedButton(
             t("page.fastflags.save_preset_btn"), variant="neutral", font_pixel_size=_ACTION_BTN_FONT_SIZE,
         )
@@ -843,7 +829,7 @@ class FastFlagsPage(BasePage):
         # reflète l'intention réelle de l'utilisateur, plus fiable que le
         # vrai fichier Roblox (volatil, Roblox peut le modifier entre deux
         # lancements). Tant qu'elle n'existe pas encore (l'utilisateur n'a
-        # jamais cliqué "Lancer Roblox"), comportement historique inchangé :
+        # jamais cliqué "Enregistrer"), comportement historique inchangé :
         # afficher ce qui est RÉELLEMENT dans le fichier Roblox.
         active_path = get_fastflags_active_config_path()
         if os.path.isfile(active_path):
@@ -1134,10 +1120,19 @@ class FastFlagsPage(BasePage):
         )
         if not name:
             return
-        path = save_custom_preset(name.strip(), self._collect_flags_from_table())
+        flags = self._collect_flags_from_table()
+        path = save_custom_preset(name.strip(), flags)
         if path is None:
             show_warning(self, t("page.fastflags.title"), t("page.fastflags.save_preset_error"))
             return
+        # Devient aussi la configuration ACTIVE : depuis le retrait de
+        # "Lancer Roblox" (qui écrivait ce même fichier auparavant, voir
+        # features/fastflags/launcher.py), "Enregistrer" est la seule
+        # action restante qui fait que CE tableau est bien ce que le
+        # protocole roblox-player:// réappliquera au PROCHAIN vrai
+        # lancement de Roblox — décision explicite (lier ça à "Enregistrer"
+        # plutôt qu'un auto-apply à chaque frappe).
+        export_flags_file(flags, get_fastflags_active_config_path())
         self._refresh_library()
         show_info(
             self, t("page.fastflags.title"),
@@ -1159,26 +1154,6 @@ class FastFlagsPage(BasePage):
     def _on_load_recommended(self) -> None:
         if self._recommended_preset_key is not None:
             self._populate_table(PRESETS[self._recommended_preset_key])
-
-    # ------------------------------------------------------------------
-    # Lancer Roblox / Réinitialiser (voir features/fastflags/launcher.py
-    # pour le détail de l'injection + lancement)
-    # ------------------------------------------------------------------
-    def _on_launch_clicked(self) -> None:
-        result = launcher.launch_roblox([], flags_override=self._collect_flags_from_table())
-        self._refresh_status()
-        if not result.roblox_found:
-            show_warning(self, t("page.fastflags.title"), t("page.fastflags.roblox_not_found_error"))
-        elif not result.injection_ok:
-            show_warning(self, t("page.fastflags.title"), t("page.fastflags.launch_injection_failed_warning"))
-        else:
-            show_info(self, t("page.fastflags.title"), t("page.fastflags.launch_success"))
-
-    def _on_kill_clicked(self) -> None:
-        if kill_roblox():
-            show_info(self, t("page.fastflags.title"), t("page.fastflags.kill_success"))
-        else:
-            show_warning(self, t("page.fastflags.title"), t("page.fastflags.kill_not_running"))
 
     def _on_reset(self) -> None:
         if reset_to_default():

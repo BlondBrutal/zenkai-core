@@ -33,9 +33,9 @@ même hors focus via HotkeyTriggerListener) :
 """
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractScrollArea, QApplication, QDialog, QFrame, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMenu, QPushButton, QSizePolicy, QSpinBox, QTableWidget, QVBoxLayout, QWidget,
 )
 
 from core.config import config
@@ -64,10 +64,19 @@ _FIELD_HEIGHT = 32
 # "Voir les coordonnées" suit la même hauteur ; sa largeur ne peut pas
 # baisser de 20% pleins comme le champ (son texte, ~260px, dépasse déjà
 # 80% de sa largeur actuelle de 298px — le couper aurait tronqué le texte),
-# donc seul son padding horizontal recule de 20% (38 -> 30px).
-_NAME_FIELD_WIDTH = round(240 * 0.8)
+# donc seul son padding horizontal recule.
+#
+# Recul supplémentaire (une 2e passe, au-delà de la réduction initiale
+# -20%/-20% ci-dessus) : nécessaire une fois testé à la largeur RÉELLEMENT
+# disponible (fenêtre 987px moins la sidebar de 165px, voir
+# ui/main_window.py — jamais 987px plein, une erreur de test répétée
+# plusieurs fois dans ce fichier), où cette ligne à elle seule dépassait
+# encore le budget de ~28px. Champ encore -7% (192 -> 178, jamais son texte
+# tapé n'est tronqué, juste la largeur du champ) ; bouton encore -14px de
+# padding (30 -> 16, son texte ne bouge pas non plus).
+_NAME_FIELD_WIDTH = 178
 _NAME_ROW_HEIGHT = round(_FIELD_HEIGHT * 1.1)
-_NAME_ROW_BTN_PADDING = round(38 * 0.8)
+_NAME_ROW_BTN_PADDING = 16
 _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # Largeurs fixes pour une rangée régulière (même principe que
 # _HEX_FIELD_WIDTH/_COORD_FIELD_WIDTH dans macro_pixel_tab.py) plutôt que de
@@ -79,18 +88,25 @@ _LABEL_GAP = 5  # -10% (2e passe, cumulée avec la précédente : 7 -> 6 -> 5)
 # élident maintenant proprement (voir _refresh_text dans les deux classes)
 # plutôt que de couper le texte n'importe où.
 _HOTKEY_FIELD_WIDTH = 112
-# Longueur du trait vert de séparation : recalibrée (mesure réelle) pour
-# s'arrêter exactement au bord DROIT du bouton "Réinitialiser" (540px =
-# x() + width() du bouton sur le 1er emplacement) — l'ancienne valeur (453)
-# datait d'un calibrage plus ancien du bouton et avait dérivé depuis
-# (largeurs de champs/boutons retouchées à plusieurs reprises sur cette
-# ligne sans jamais recalculer cette longueur). Le trait suit le bouton
-# (calé sur SA position), jamais l'inverse : essayer de rétrécir
-# Enregistrer/Réinitialiser pour les faire tenir dans une longueur de trait
-# déjà fixée forcerait toggle/status_label (sur la même ligne, à gauche
-# d'eux) à chevaucher ces boutons — voir _build_control_row. Même valeur que
-# macro_pixel_tab.py._SEPARATOR_WIDTH.
-_SEPARATOR_WIDTH = 540
+# Marge droite partagée par TOUS les enfants directs de MacroSimpleTab (les
+# emplacements eux-mêmes, les traits verts de séparation, la rangée du
+# bouton "Ajouter un emplacement") — posée UNE SEULE FOIS ici (voir
+# MacroSimpleTab.__init__), jamais dupliquée à l'intérieur de chaque
+# MacroSimpleSlot comme avant : cette ancienne duplication est justement ce
+# qui avait rendu nécessaire un calibrage manuel, en pixels, de la longueur
+# du trait vert (_SEPARATOR_WIDTH, retiré) pour qu'il s'arrête "au bon
+# endroit" — une valeur qui dérivait à chaque changement de largeur de
+# bouton ailleurs dans ce fichier (453 -> 540 déjà constaté une fois), et qui
+# s'est révélée fausse une seconde fois : calibrée à la largeur de fenêtre
+# RÉELLE mais mesurée sur PAGE de test à 987px, alors que la vraie largeur
+# disponible (fenêtre 987px MOINS la sidebar de 165px, voir
+# ui/main_window.py/ui/sidebar.py) n'est que d'environ 822px — d'où le
+# débordement réel (rectangles/boutons rognés par le viewport, scrollbar
+# horizontale désactivée) que ce calibrage en dur ne pouvait plus rattraper.
+# Le trait vert est maintenant Expanding (voir _build_green_separator) :
+# il occupe TOUJOURS exactement la largeur disponible, quelle qu'elle soit,
+# sans plus jamais avoir besoin d'un nombre calibré à la main.
+_SLOT_RIGHT_MARGIN = 14
 # La consigne d'origine (+35%, 112 -> 151) tronquait toujours "Tant que
 # maintenu  ▾" (le plus long des 3 libellés) : largeur de texte + flèche
 # mesurée par rendu RÉEL (police neutralButton) à 128px, + 36px de padding
@@ -228,6 +244,28 @@ def _labeled_column(label_text: str, widget: QWidget) -> QWidget:
     column.setSpacing(_LABEL_GAP)
     label = QLabel(label_text)
     label.setStyleSheet(f"font-size: 12px; color: {STATUS_NEUTRAL};")
+    # Sans ces deux lignes, un libellé plus long que son champ (ex: "Délai
+    # répét. (ms)" au-dessus d'un champ de 90px, voir _LOOP_DELAY_FIELD_WIDTH)
+    # forçait toute la colonne à s'élargir jusqu'à la largeur du TEXTE plutôt
+    # que du champ — cause réelle d'un débordement de carte silencieux
+    # (scrollbar horizontale désactivée, voir MacroPage._build_tab_scroll_area)
+    # découvert en testant à la largeur RÉELLEMENT disponible (fenêtre 987px
+    # moins la sidebar de 165px, voir ui/main_window.py — jamais 987px plein,
+    # une erreur de test répétée plusieurs fois dans ce fichier). Un simple
+    # retour à la ligne (2 lignes au pire) suffit, sans jamais tronquer
+    # l'information contrairement à un texte de bouton élidé.
+    label.setWordWrap(True)
+    # widget.width() n'est PAS fiable ici : à ce stade (widget tout juste
+    # construit, pas encore ajouté à un layout), un widget dimensionné via
+    # sizeHint() (ex: AnimatedButton) n'a pas encore de géométrie réelle et
+    # renvoie une largeur par défaut sans rapport (constaté : 640px pour un
+    # bouton dont le sizeHint réel est 194px) — seul un widget explicitement
+    # figé via setFixedWidth AVANT cet appel a un width() déjà correct. Ce
+    # calcul manuel reproduit ce que Qt ferait lui-même une fois posé dans un
+    # layout (borné entre min/max, sizeHint() en repli), fiable immédiatement.
+    effective_width = min(widget.maximumWidth(), max(widget.minimumWidth(), widget.sizeHint().width()))
+    if effective_width > 0:
+        label.setFixedWidth(effective_width)
     column.addWidget(label)
     column.addWidget(widget)
     return container
@@ -255,15 +293,11 @@ class MacroSimpleSlot(QWidget):
         QApplication.instance().aboutToQuit.connect(self._stop_all)
 
         layout = QVBoxLayout(self)
-        # Marge droite (0 -> 14) : sans elle, les cartes "Activation"/
-        # "Séquence" (qui remplissent toute la largeur de ce layout, voir
-        # ci-dessous) touchaient quasiment la scrollbar de la page (voir
-        # MacroPage._build_tab_scroll_area) — la marge de la QScrollArea
-        # elle-même (scrollarea_gap_qss) ne suffisait pas ici. Voir
-        # _build_control_row pour l'alignement de Réinitialiser (indépendant
-        # de cette marge, calé sur le trait vert de séparation) — même
-        # correctif que macro_pixel_tab.py.
-        layout.setContentsMargins(0, 0, 14, 0)
+        # PAS de marge droite ici : posée UNE SEULE FOIS, partagée par tous
+        # les emplacements, au niveau de MacroSimpleTab (_SLOT_RIGHT_MARGIN)
+        # — voir sa définition en haut du fichier pour l'historique de bug
+        # que cette centralisation corrige.
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
 
         control_row = self._build_control_row()
@@ -355,7 +389,7 @@ class MacroSimpleSlot(QWidget):
         card.setProperty("class", "card")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(17, 12, 24, 12)
-        layout.setSpacing(11)  # -20% (14 -> 11) : espace sous le titre de carte
+        layout.setSpacing(9)  # -20% (14 -> 11), puis -15% (11 -> 9) : espace sous le titre de carte
 
         title = QLabel(title_text)
         title.setStyleSheet("font-size: 15px; font-weight: 700; color: #E7E9EE; padding-bottom: 3px;")
@@ -530,6 +564,15 @@ class MacroSimpleSlot(QWidget):
         # seule la barre elle-même est masquée.
         table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # ScrollPerPixel (pas ScrollPerItem, le mode par défaut d'un
+        # QAbstractItemView) + un singleStep réduit : en ScrollPerItem, un
+        # seul cran de molette saute directement _ROW_HEIGHT (38px) x le
+        # nombre de lignes par cran de Qt (3 par défaut), soit ~114px d'un
+        # coup — trop imprécis pour ajuster finement quelle ligne est
+        # visible. En pixels avec un pas de 10px, un cran de molette ne
+        # déplace plus que ~30px, un défilement bien plus progressif.
+        table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.verticalScrollBar().setSingleStep(10)
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         table.customContextMenuRequested.connect(self._on_table_context_menu)
         return table
@@ -588,9 +631,16 @@ class MacroSimpleSlot(QWidget):
         return False
 
     def _build_control_row(self) -> QHBoxLayout:
+        # Sur une seule ligne (toggle+statut, puis Enregistrer/Réinitialiser
+        # à droite) : revenu à une seule ligne à la demande (l'ancien passage
+        # à 2 lignes datait d'un calibrage fait à une largeur de test encore
+        # fausse à l'époque, voir l'historique de _SLOT_RIGHT_MARGIN plus
+        # haut) — vérifié par mesure directe (minimumSize().width() du
+        # layout) à la largeur RÉELLEMENT disponible (fenêtre 987px moins la
+        # sidebar de 165px, moins _SLOT_RIGHT_MARGIN) : 562px nécessaires
+        # pour 808px disponibles, tient largement sans tronquer aucun texte.
         row = QHBoxLayout()
         row.setSpacing(8)  # -10% (2e passe : 10 -> 9 -> 8)
-
         self.start_toggle = ToggleSwitch(checked=False)
         self.start_toggle.toggled.connect(self._on_start_toggle)
         row.addWidget(self.start_toggle)
@@ -607,15 +657,7 @@ class MacroSimpleSlot(QWidget):
         self.reset_btn = AnimatedButton(t("page.macro.simple.reset_btn"), variant="neutral")
         self.reset_btn.clicked.connect(self._on_reset_clicked)
         row.addWidget(self.reset_btn)
-        # 21px (pas 35) : le layout parent (voir __init__) porte maintenant
-        # lui-même une marge droite de 14px (cartes "Activation"/"Séquence"),
-        # donc 21+14=35 retombe exactement sur la position mesurée du bord
-        # droit de "Réinitialiser" — voir _build_green_separator plus bas
-        # dans ce fichier (longueur du trait vert CALÉE sur cette position,
-        # pas l'inverse : essayer de rétrécir ce bouton pour l'aligner sur
-        # une longueur de trait déjà fixée forcerait toggle/status_label, sur
-        # cette même ligne à gauche, à chevaucher Enregistrer/Réinitialiser).
-        row.addSpacing(21)
+
         return row
 
     # ------------------------------------------------------------------
@@ -742,11 +784,15 @@ class MacroSimpleSlot(QWidget):
         action_capture.changed.connect(self._on_any_row_action_changed)
         self.table.setCellWidget(row, COL_ACTION, self._wrap_centered(action_capture, self._ROW_MARGIN, self._ROW_MARGIN))
 
-        # "Curseur" : quand actif, l'action se joue là où se trouve déjà le
-        # curseur au moment du rejeu (voir player.py), X/Y de CETTE ligne
-        # deviennent alors inutilisés — d'où leur désactivation dans
-        # _update_row_enabled_state ci-dessous, appelée au toggle.
-        current_pos_toggle = ToggleSwitch(checked=step.use_current_position)
+        # "Coordonnées" : quand actif, l'action se joue aux coordonnées X/Y
+        # définies sur CETTE ligne ; quand désactivé, elle s'exécute comme
+        # une macro classique à la position actuelle du curseur (voir
+        # player.py), X/Y de cette ligne deviennent alors inutilisés — d'où
+        # leur désactivation dans _update_row_enabled_state ci-dessous,
+        # appelée au toggle. Le champ persisté (MacroStep.use_current_position)
+        # garde son sens d'origine (inverse de ce toggle) pour rester
+        # compatible avec les macros déjà sauvegardées.
+        current_pos_toggle = ToggleSwitch(checked=not step.use_current_position)
         current_pos_toggle.setToolTip(t("page.macro.simple.col_current_pos_tooltip"))
         current_pos_toggle.toggled.connect(self._on_current_pos_toggled)
         self.table.setCellWidget(
@@ -790,17 +836,17 @@ class MacroSimpleSlot(QWidget):
         current_pos_toggle = self._cell_widget(row, COL_CURRENT_POS)
         # X/Y restent TOUJOURS cliquables/éditables, quelle que soit l'action
         # de la ligne (clavier, souris, ou pas encore définie) — seul le
-        # toggle "Curseur" les désactive, seule raison légitime de ne pas
-        # s'en servir (l'action se joue alors à la position actuelle du
-        # curseur). Les lier en plus au type d'action (comme avant) rendait
-        # ce champ mystérieusement désactivé selon ce qui était capturé dans
-        # une AUTRE colonne, ce qui ressemblait à un bug de saisie — alors
-        # que _row_to_step remet déjà x=y=0 à la sauvegarde si l'action
-        # n'est pas une souris, donc aucune valeur non pertinente n'est
-        # jamais persistée/rejouée.
-        use_current_position = current_pos_toggle.isChecked()
-        x_spin.setEnabled(not use_current_position)
-        y_spin.setEnabled(not use_current_position)
+        # toggle "Coordonnées" les désactive quand il est OFF, seule raison
+        # légitime de ne pas s'en servir (l'action se joue alors comme une
+        # macro classique, à la position actuelle du curseur). Les lier en
+        # plus au type d'action (comme avant) rendait ce champ mystérieusement
+        # désactivé selon ce qui était capturé dans une AUTRE colonne, ce qui
+        # ressemblait à un bug de saisie — alors que _row_to_step remet déjà
+        # x=y=0 à la sauvegarde si l'action n'est pas une souris, donc aucune
+        # valeur non pertinente n'est jamais persistée/rejouée.
+        use_coordinates = current_pos_toggle.isChecked()
+        x_spin.setEnabled(use_coordinates)
+        y_spin.setEnabled(use_coordinates)
 
     def _row_to_step(self, row: int) -> MacroStep:
         action_capture = self._cell_widget(row, COL_ACTION)
@@ -816,7 +862,7 @@ class MacroSimpleSlot(QWidget):
             y=y_spin.value() if action == ACTION_MOUSE else 0,
             hold_ms=hold_spin.value(),
             delay_after_ms=delay_spin.value(),
-            use_current_position=action == ACTION_MOUSE and current_pos_toggle.isChecked(),
+            use_current_position=action == ACTION_MOUSE and not current_pos_toggle.isChecked(),
         )
 
     def _read_steps(self) -> list[MacroStep]:
@@ -1131,9 +1177,14 @@ class SimpleSlotChooserDialog(QDialog):
         return row
 
 
-def _build_green_separator(width: int) -> QFrame:
+def _build_green_separator() -> QFrame:
+    # Expanding (pas setFixedSize) : occupe toujours toute la largeur
+    # disponible de son layout parent, quelle qu'elle soit — voir
+    # _SLOT_RIGHT_MARGIN pour l'historique du bug qu'évite cette approche
+    # (un ancien calibrage en pixels qui dérivait/débordait).
     line = QFrame()
-    line.setFixedSize(width, 2)
+    line.setFixedHeight(2)
+    line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     line.setStyleSheet(f"background-color: {STATUS_OK}; border: none; border-radius: 1px;")
     return line
 
@@ -1155,7 +1206,10 @@ class MacroSimpleTab(QWidget):
         self._slot_separators: dict[MacroSimpleSlot, QFrame] = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Marge droite partagée par tous les enfants de ce layout (voir
+        # _SLOT_RIGHT_MARGIN, en tête de fichier, pour l'historique) : posée
+        # UNE SEULE FOIS ici plutôt que dans chaque MacroSimpleSlot.
+        layout.setContentsMargins(0, 0, _SLOT_RIGHT_MARGIN, 0)
         # -20% (18 -> 14), puis encore -20% (14 -> 11) : espace au-dessus/
         # en dessous du trait de séparation vert (voir _build_green_separator)
         # — un seul spacing gouverne les deux écarts entourant ce trait,
@@ -1172,9 +1226,9 @@ class MacroSimpleTab(QWidget):
         self._slots_layout.setSpacing(11)
         layout.addLayout(self._slots_layout)
 
-        # _SEPARATOR_WIDTH : voir sa définition en haut du fichier — aligné à
-        # gauche pour ne pas être centré/étiré par le layout.
-        layout.addWidget(_build_green_separator(_SEPARATOR_WIDTH), 0, Qt.AlignmentFlag.AlignLeft)
+        # Expanding (voir _build_green_separator) : remplit toute la largeur
+        # disponible de ce layout, pas besoin d'AlignLeft/de largeur figée.
+        layout.addWidget(_build_green_separator())
 
         self.add_slot_btn = AnimatedButton(t("page.macro.simple.add_slot_btn"), variant="neutral")
         self.add_slot_btn.clicked.connect(self._on_add_slot_clicked)
@@ -1193,8 +1247,8 @@ class MacroSimpleTab(QWidget):
             # Un séparateur AVANT ce nouvel emplacement (pas seulement un
             # seul, tout en bas, après le dernier) : garde une ligne verte
             # entre CHAQUE emplacement, pas seulement après le dernier.
-            separator = _build_green_separator(_SEPARATOR_WIDTH)
-            self._slots_layout.addWidget(separator, 0, Qt.AlignmentFlag.AlignLeft)
+            separator = _build_green_separator()
+            self._slots_layout.addWidget(separator)
 
         slot = MacroSimpleSlot(deletable=deletable)
         if separator is not None:

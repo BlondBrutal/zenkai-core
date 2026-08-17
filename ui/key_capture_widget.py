@@ -62,6 +62,13 @@ class KeyCaptureWidget(QPushButton):
         # cadre figé (voir theme.qss).
         self.setProperty("class", "hotkeyCaptureButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # QPushButton a Qt.ContextMenuPolicy.DefaultContextMenu par défaut
+        # (pas NoContextMenu, vérifié) : ce widget capture LUI-MÊME tous les
+        # boutons de souris (voir mousePressEvent, y compris le clic droit
+        # en réaction), jamais de menu contextuel légitime ici — explicite
+        # plutôt que de compter sur le défaut Qt, pour ne laisser aucune
+        # chance à un évènement ContextMenu natif de s'interposer.
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self._key = initial_key
         self._listening = False
         self._exclude_click_buttons = exclude_click_buttons
@@ -135,6 +142,18 @@ class KeyCaptureWidget(QPushButton):
             # clicked() par le mécanisme interne de QAbstractButton.
             return
         super().mouseReleaseEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if self._listening:
+            # Même principe que mouseReleaseEvent ci-dessus, côté clavier :
+            # l'appui correspondant n'a pas été transmis à super() dans
+            # keyPressEvent (capturé nous-mêmes), donc laisser passer le
+            # relâchement ici risquerait de faire réagir le mécanisme interne
+            # de QAbstractButton (ex: Key_Space, qu'il traite normalement en
+            # deux temps, pression PUIS relâchement) — jamais vérifié
+            # inoffensif, donc avalé par prudence plutôt que transmis.
+            return
+        super().keyReleaseEvent(event)
 
     def focusOutEvent(self, event) -> None:
         # Sans ça, un grabKeyboard() jamais relâché (l'utilisateur clique

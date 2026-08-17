@@ -30,7 +30,7 @@ from ui.info_badge import InfoBadge
 from ui.pages.base_page import BasePage
 from ui.pages.macro_pixel_tab import PixelMacroTab
 from ui.pages.macro_simple_tab import MacroSimpleTab
-from ui.scrollbar_style import apply_viewport_scrollbar_gap, scrollarea_gap_qss, style_scrollbar_directly
+from ui.scrollbar_style import apply_viewport_scrollbar_gap, style_scrollbar_directly
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK
 from ui.toggle_switch import ToggleSwitch
 
@@ -229,6 +229,7 @@ class MacroPage(BasePage):
     def __init__(self, parent=None):
         super().__init__(t("page.macro.title"), "", parent)
         self.add_info_badge(t("page.macro.info_tooltip"))
+        self.add_beta_badge(t("app.beta_warning"))
 
         # Marge droite réduite : sinon la colonne Bibliothèque, déjà collée
         # à droite du body_row, laisse un vide trop large avant le bord de
@@ -333,14 +334,24 @@ class MacroPage(BasePage):
         # QScrollArea peint sa propre viewport avec la couleur de palette Qt
         # par défaut tant qu'on ne la force pas transparente (même limitation
         # que pour les résultats de diagnostic sur la page Performance).
-        # padding-right : espace entre le contenu (cartes, etc.) et la
-        # scrollbar — règle globale, voir CLAUDE.md/ui/scrollbar_style.py.
-        scroll_area.setStyleSheet(
-            "QScrollArea { background: transparent; border: none;"
-            f" {scrollarea_gap_qss()} }}"
-        )
+        scroll_area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         scroll_area.setWidget(container)
         scroll_area.viewport().setStyleSheet("background: transparent;")
+        # Espace entre le contenu (cartes, boutons, trait vert...) et la
+        # scrollbar — règle globale, voir CLAUDE.md/ui/scrollbar_style.py.
+        # PAS via un "padding-right" QSS sur la QScrollArea (ancienne
+        # tentative ici, voir historique) : sur une QScrollArea "nue", ça
+        # rétrécit tout l'ensemble viewport+scrollbar depuis le bord droit,
+        # donc le vide obtenu apparaît APRÈS la scrollbar (entre elle et le
+        # bord de la fenêtre), jamais AVANT (entre le contenu et elle) —
+        # vérifié par mesure directe de géométrie (viewport et scrollbar
+        # restaient parfaitement accolés, contenu et cartes venant donc
+        # toucher la scrollbar malgré ce padding). setViewportMargins (même
+        # fonction que pour un QListWidget/QTableWidget à scrollbar interne,
+        # QScrollArea est aussi un QAbstractScrollArea) rétrécit le viewport
+        # LUI-MÊME, indépendamment de la position de la scrollbar : c'est la
+        # seule technique qui fonctionne réellement ici.
+        apply_viewport_scrollbar_gap(scroll_area)
         # RoundedScrollBarStyle (le QProxyStyle global) ne s'applique pas de
         # façon fiable à cette scrollbar précise (vérifié par échantillonnage
         # de pixels : piste invisible, fond de la page qui transparaissait) —

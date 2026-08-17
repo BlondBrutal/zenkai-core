@@ -102,6 +102,20 @@ def get_custom_scripts_dir() -> str:
     return scripts_dir
 
 
+def get_fleasion_presets_dir() -> str:
+    """Dossier des presets Fleasion (page Fleasion) : un fichier
+    .zkfleasion (JSON) par preset, plus un sous-dossier <id>/assets/ par
+    preset pour les fichiers "Local" (texture/son/mesh) qu'il référence —
+    voir features/fleasion/preset_store.py. Distinct du dossier de
+    DÉPLOIEMENT (%LocalAppData%\\FleasionNT\\configs\\ZenkaiCore\\, propre
+    à Fleasion lui-même, voir features/fleasion/config_writer.py) : ce
+    dossier-ci est la source de vérité gérée par Zenkai Core, l'autre n'est
+    qu'une copie régénérée à chaque déploiement."""
+    presets_dir = os.path.join(get_app_data_dir(), "fleasion_presets")
+    os.makedirs(presets_dir, exist_ok=True)
+    return presets_dir
+
+
 def get_fastflags_backup_marker_path() -> str:
     """Marqueur JSON ({"existed": bool}) indiquant si la sauvegarde
     ci-dessus a déjà été prise, et si le vrai fichier existait à ce
