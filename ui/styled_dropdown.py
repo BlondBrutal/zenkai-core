@@ -70,7 +70,16 @@ class StyledDropdown(QPushButton):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setProperty("class", "neutralButton")
+        # .compactNeutralButton (pas .neutralButton) : ce widget vit toujours
+        # à une hauteur FIXE et compacte (32px dans macro_simple_tab.py, 34px
+        # dans page_fleasion.py, jamais une hauteur libre) — le padding
+        # vertical de .neutralButton (10px 10px), pensé pour un bouton qui
+        # peut grandir librement, ne laissait plus assez de place à la
+        # hauteur réelle de la police une fois figé à ces tailles-là,
+        # rognant le bas des lettres descendantes (audit complet du texte
+        # coupé sur les boutons, voir CLAUDE.md/design system — mesuré via
+        # QFontMetrics, pas juste à l'œil).
+        self.setProperty("class", "compactNeutralButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # Alignement à gauche (comme un QComboBox) : un QPushButton centre
         # son texte par défaut, ce qui casserait la ressemblance visuelle

@@ -5,10 +5,11 @@ l'ancien gros bouton texte séparé par une icône compacte directement à côt�
 du titre de l'emplacement, plutôt qu'une rangée entière dédiée à cette seule
 action destructive.
 """
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QWidget
 
+from ui.info_badge import _SHOW_DELAY_MS, _shared_bubble
 from ui.status_colors import STATUS_CRITICAL
 
 _SIZE = 20
@@ -22,16 +23,44 @@ class TrashIconButton(QWidget):
         self.setFixedSize(_SIZE, _SIZE)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hovered = False
+        self._tooltip_text = ""
+
+        # Bulle maison partagée (voir ui/info_badge.py::_shared_bubble), pas
+        # le QToolTip natif de Qt : sous Windows, le border-radius d'un
+        # QToolTip est ignoré par la fenêtre native (coins toujours carrés,
+        # d'où le "rectangle noir" constaté) — même mécanisme que les badges
+        # "?"/"!" pour un rendu de bulle identique partout dans l'app.
+        self._show_timer = QTimer(self)
+        self._show_timer.setSingleShot(True)
+        self._show_timer.setInterval(_SHOW_DELAY_MS)
+        self._show_timer.timeout.connect(self._show_bubble)
+
+    def setToolTip(self, text: str) -> None:
+        # Volontairement PAS de super().setToolTip() : on ne veut jamais du
+        # QToolTip natif ici, uniquement la bulle maison ci-dessus/dessous.
+        self._tooltip_text = text
 
     def enterEvent(self, event) -> None:
         self._hovered = True
         self.update()
+        self._show_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._hovered = False
         self.update()
+        self._show_timer.stop()
+        _shared_bubble().hide()
         super().leaveEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self._show_timer.stop()
+        _shared_bubble().hide()
+        super().hideEvent(event)
+
+    def _show_bubble(self) -> None:
+        if self._tooltip_text:
+            _shared_bubble().show_at(QCursor.pos(), self._tooltip_text)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

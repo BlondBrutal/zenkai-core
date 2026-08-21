@@ -18,12 +18,38 @@ plus écraser la config en cours).
 Bootstrapper Roblox (voir features/fastflags/launcher.py et protocol.py) :
 pas de bouton "Lancer Roblox"/"Fermer Roblox" dans cette page (retirés,
 Roblox se lance normalement depuis le site/l'app Roblox) — "Enregistrer"
-(_on_save_preset) sauvegarde le tableau comme preset nommé dans la
-Bibliothèque ET écrit la configuration "active" (get_fastflags_active_config_path)
-que le protocole roblox-player:// intercepté réinjecte dans le vrai
-ClientAppSettings.json à CHAQUE vrai lancement de Roblox, même sans que
-cette page/l'app soit ouverte — c'est cette action qui rend un preset
-"celui qui s'applique désormais", pas un simple lancement.
+(_on_save_preset) reste SEULEMENT une sauvegarde nommée dans la
+Bibliothèque (+ mise à jour de la configuration "active",
+get_fastflags_active_config_path, en bonus) : ce n'est PLUS lui qui rend
+les Fast Flags effectifs, voir ci-dessous.
+
+MÉCANISME PRINCIPAL (voir _auto_apply_active_config, appelée par
+_on_open_clicked, _on_item_changed, _on_delete_row, _on_add_row et
+_on_known_flag_chosen) : tant que le coupe-circuit "Fast Flags actifs" est
+allumé, TOUTE modification du contenu réellement actif — ouvrir un preset
+depuis la Bibliothèque, éditer une valeur, ajouter/supprimer une ligne —
+réapplique IMMÉDIATEMENT ce contenu dans le VRAI ClientAppSettings.json
+(et dans la configuration "active" persistée), sans attendre un clic sur
+"Enregistrer" ni un lancement intercepté. AVANT même que l'utilisateur
+clique "Jouer", peu importe comment Roblox sera ensuite lancé (site/app
+Roblox, raccourci Bureau, Menu Démarrer, RobloxPlayerBeta.exe direct). Ce
+mécanisme ne dépend d'AUCUN comportement Windows tiers (registre, choix de
+gestionnaire de protocole...) : il ne peut échouer que si l'écriture
+disque elle-même échoue (Roblox a le fichier ouvert en écriture, droits,
+disque plein), auquel cas show_warning() prévient explicitement (jamais un
+échec silencieux). Coupe-circuit OFF (_on_kill_switch_toggled) : vide les
+DEUX (configuration active ET vrai fichier) et n'applique plus rien
+automatiquement tant qu'il reste éteint — _auto_apply_active_config()
+devient un no-op dans cet état, par construction (voir sa docstring).
+
+Interception du protocole roblox-player:// : reléguée au rang de BONUS
+best-effort (voir protocol.py, "PIÈGE CRITIQUE" — le mécanisme UserChoice
+de Windows peut faire qu'un register() par ailleurs correct ne soit
+JAMAIS invoqué, un problème déjà rencontré et non garanti réparable côté
+app). Un échec d'enregistrement/désinscription du protocole n'annule plus
+le toggle ni ne bloque l'édition — seulement un avertissement informatif.
+Ne plus jamais faire dépendre le fonctionnement RÉEL des Fast Flags de ce
+protocole ; l'écriture directe ci-dessus reste la seule garantie.
 
 show_recommendation() reste le point d'accroche utilisé par la page
 Performance (bouton "Optimiser pour Roblox" → bottleneck détecté → preset
@@ -49,6 +75,7 @@ from features.fastflags.manager import (
     PRESETS, delete_custom_preset, detect_active_preset, detect_value_type,
     export_flags_file, get_known_flags, import_flags_file, list_custom_presets,
     load_custom_preset, read_current_flags, reset_to_default, save_custom_preset,
+    write_flags,
 )
 from ui.animated_button import AnimatedButton
 from ui.pages.base_page import BasePage
@@ -649,19 +676,42 @@ class FastFlagsPage(BasePage):
 
         return wrapper
 
+    def _auto_apply_active_config(self, flags: dict) -> bool:
+        """Tient la configuration ACTIVE (get_fastflags_active_config_path)
+        et le VRAI ClientAppSettings.json synchronisés avec `flags` — voir
+        le paragraphe "MÉCANISME PRINCIPAL" de la docstring du module.
+        Appelée à chaque modification réelle du contenu actif (ouverture
+        d'un preset, édition/ajout/suppression de ligne) — PAS depuis
+        _on_save_preset, qui reste une action distincte (sauvegarde
+        nommée). No-op total (retourne True sans rien écrire) tant que
+        "Fast Flags actifs" est éteint : voir _on_kill_switch_toggled, qui
+        vide explicitement les deux au lieu de compter sur cette méthode
+        dans ce cas précis. Retourne False (et prévient déjà l'utilisateur
+        via show_warning) seulement si l'écriture du VRAI fichier échoue."""
+        if not bool(config.get("fastflags_globally_enabled", True)):
+            return True
+        export_flags_file(flags, get_fastflags_active_config_path())
+        launcher.ensure_backup_exists()
+        if not write_flags(flags):
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.apply_error"))
+            return False
+        return True
+
     def _on_kill_switch_toggled(self, checked: bool) -> None:
-        # Effet immédiat sur l'interception : si l'écriture/suppression
-        # registre échoue, on revient à l'état précédent plutôt que de
-        # laisser l'interrupteur mentir sur l'état réel (registre vs config
-        # désynchronisés) — jamais d'échec silencieux (voir protocol.py).
+        # MÉCANISME PRINCIPAL désormais : écrire/vider directement le VRAI
+        # ClientAppSettings.json (voir docstring du module) — bloquant,
+        # l'interrupteur revient en arrière si CETTE écriture échoue.
+        # L'interception protocole roblox-player:// (register()/unregister())
+        # reste tentée par bonus juste après, mais un échec ne bloque plus
+        # rien : elle n'est plus fiable à 100% (voir "PIÈGE CRITIQUE" dans
+        # protocol.py, conflit UserChoice non garanti réparable), alors que
+        # l'écriture directe, elle, ne dépend d'aucun mécanisme Windows tiers.
         if checked:
-            # Avertissement AVANT d'écrire dans le registre (catégorie
-            # sensible PROTOCOL_HANDLER, voir core/security_log.py) : ce
-            # toggle est un changement de configuration ponctuel et
-            # explicite, pas le chemin de lancement du jeu lui-même (celui-ci
-            # — protocole roblox-player:// — reste volontairement sans
-            # friction, voir la docstring de features/fastflags/launcher.py).
-            # Annuler
+            # Avertissement AVANT d'écrire quoi que ce soit (catégorie
+            # sensible FILE_MODIFY, voir core/security_log.py) : ce toggle
+            # est un changement de configuration ponctuel et explicite, pas
+            # le chemin de lancement du jeu lui-même (celui-ci reste
+            # volontairement sans friction, voir launcher.py). Annuler
             # revient au switch décoché SANS ré-émettre "toggled" (voir
             # ToggleSwitch.setChecked), donc sans boucle.
             if not show_confirm(
@@ -671,36 +721,76 @@ class FastFlagsPage(BasePage):
             ):
                 self.kill_switch.setChecked(False, animate=False)
                 return
-            if not protocol.register():
-                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
+            # Posé AVANT l'appel : _auto_apply_active_config() lit ce même
+            # réglage pour décider d'écrire ou non — sans ça (avec l'ancien
+            # config.set() en toute fin de méthode), l'appel ci-dessous se
+            # verrait encore comme "éteint" et n'écrirait rien.
+            config.set("fastflags_globally_enabled", True)
+            if not self._auto_apply_active_config(self._collect_flags_from_table()):
+                config.set("fastflags_globally_enabled", False)
                 self.kill_switch.setChecked(False, animate=False)
                 return
             config.set("auto_apply_fastflags_on_launch", True)
+            # Bonus best-effort à partir d'ici : un échec n'annule plus le
+            # toggle (le vrai fichier est déjà à jour ci-dessus), juste un
+            # avertissement informatif.
+            if not protocol.register():
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
+            elif protocol.has_user_choice_conflict():
+                # Notre clé HKCU est correcte, mais Windows a déjà un AUTRE
+                # gestionnaire mémorisé pour roblox-player:// (voir le
+                # "PIÈGE CRITIQUE" dans protocol.py) : register() seul ne
+                # suffit pas ici. Sans conséquence sur les Fast Flags
+                # eux-mêmes (déjà appliqués directement ci-dessus), donc
+                # juste informatif, pas bloquant.
+                protocol.reset_user_choice()
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_user_choice_conflict"))
         else:
-            if not protocol.unregister():
-                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_unregister_error"))
+            # Coupe-circuit OFF : vide les DEUX explicitement (configuration
+            # active ET vrai fichier) — _auto_apply_active_config() n'est
+            # PAS utilisée ici, son no-op "rien à faire tant qu'éteint" ne
+            # correspondrait pas à "vider" (une action, pas une absence
+            # d'action). Réglage posé AVANT, même raison que la branche ON.
+            config.set("fastflags_globally_enabled", False)
+            launcher.clear_active_config()
+            if not reset_to_default():
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.apply_error"))
+                config.set("fastflags_globally_enabled", True)
                 self.kill_switch.setChecked(True, animate=False)
                 return
             config.set("auto_apply_fastflags_on_launch", False)
-            # Même principe qu'avant la fusion (stoppe l'existant tout de
-            # suite) : vide le vrai fichier Roblox, sans toucher au contenu
-            # de l'éditeur (l'utilisateur peut réactiver puis rappliquer la
-            # même configuration ensuite).
-            reset_to_default()
-        config.set("fastflags_globally_enabled", checked)
+            # Bonus best-effort : un échec de désinscription ne remet plus le
+            # toggle à ON (le vrai fichier est déjà vidé ci-dessus).
+            if not protocol.unregister():
+                show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_unregister_error"))
         self._refresh_status()
 
     def _verify_protocol_registration(self) -> None:
-        # Filet de sécurité silencieux (pas de barre de statut dédiée,
-        # retirée pour libérer de la place) : si l'interception est censée
-        # être active mais que le registre a dérivé (Roblox, l'utilisateur,
-        # ou un nettoyeur de registre a pu le modifier), tente une
-        # réparation silencieuse — et seulement si CETTE tentative échoue,
-        # prévient clairement l'utilisateur (jamais un échec totalement
-        # silencieux, voir protocol.py).
+        # BONUS uniquement désormais (voir docstring du module et
+        # _on_kill_switch_toggled) : l'interception protocole n'est plus le
+        # mécanisme dont dépendent les Fast Flags eux-mêmes (déjà appliqués
+        # directement au vrai fichier), donc rien ici ne doit jamais
+        # affecter le toggle/la config — seulement informer si ce bonus a
+        # cessé de fonctionner. Filet de sécurité silencieux (pas de barre
+        # de statut dédiée, retirée pour libérer de la place) : si
+        # l'interception est censée être active mais que le registre a
+        # dérivé (Roblox, l'utilisateur, ou un nettoyeur de registre a pu le
+        # modifier), tente une réparation silencieuse — et seulement si
+        # CETTE tentative échoue, prévient clairement l'utilisateur (jamais
+        # un échec totalement silencieux, voir protocol.py).
         if not self.kill_switch.isChecked():
             return
-        if protocol.health_check() != "ok" and not protocol.register():
+        status = protocol.health_check()
+        if status == "user_choice_conflict":
+            # register() ne répare rien dans ce cas précis (voir "PIÈGE
+            # CRITIQUE" dans protocol.py) : inutile de le retenter. Seule
+            # action possible : supprimer le choix Windows existant pour
+            # forcer un nouveau chooser au prochain lancement — jamais
+            # silencieux, donc toujours prévenir ensuite (succès ou non).
+            protocol.reset_user_choice()
+            show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_user_choice_conflict"))
+            return
+        if status != "ok" and not protocol.register():
             show_warning(self, t("page.fastflags.title"), t("page.fastflags.protocol_register_error"))
 
     # ------------------------------------------------------------------
@@ -754,13 +844,20 @@ class FastFlagsPage(BasePage):
         # virer le texte au gris clair générique (theme.qss), notamment la
         # colonne Valeur (normalement verte).
         self.table.setItemDelegate(_PreserveForegroundDelegate(self.table))
-        # CurrentChanged (en plus des déclencheurs par défaut) : un simple
-        # clic change la cellule "courante", donc ouvre déjà l'éditeur — sans
-        # ça, Qt exige un double-clic (ou F2/taper directement) pour entrer
-        # en édition.
+        # PAS de CurrentChanged (contrairement à un ancien essai) : ce
+        # déclencheur ouvrait déjà l'éditeur au simple clic (juste pour
+        # sélectionner/naviguer une ligne), ce qui causait à la fois le
+        # décalage visuel signalé (item -> éditeur, alignement/rendu
+        # légèrement différents) et des cas où l'éditeur d'une ligne
+        # précédente restait visuellement "coincé" (curseur vert peint à la
+        # main par _GreenCursorLineEdit, voir sa docstring) après un clic
+        # rapide vers une autre ligne. Un double-clic (ou F2/taper
+        # directement) reste nécessaire pour entrer en édition — même
+        # convention que les autres tableaux de l'app (macro_simple_tab.py,
+        # page_fleasion.py : NoEditTriggers, édition seulement via une
+        # action explicite).
         self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.CurrentChanged
-            | QAbstractItemView.EditTrigger.DoubleClicked
+            QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.EditKeyPressed
             | QAbstractItemView.EditTrigger.AnyKeyPressed
         )
@@ -873,11 +970,18 @@ class FastFlagsPage(BasePage):
         return row
 
     def _on_item_changed(self, item: QTableWidgetItem) -> None:
-        if item.column() != COL_VALUE:
-            return
-        badge_container = self.table.cellWidget(item.row(), COL_TYPE)
-        if badge_container is not None:
-            badge_container.layout().itemAt(0).widget().setText(detect_value_type(item.text()))
+        if item.column() == COL_VALUE:
+            badge_container = self.table.cellWidget(item.row(), COL_TYPE)
+            if badge_container is not None:
+                badge_container.layout().itemAt(0).widget().setText(detect_value_type(item.text()))
+        if item.column() in (COL_NAME, COL_VALUE):
+            # Voir "MÉCANISME PRINCIPAL" dans la docstring du module : toute
+            # valeur/nom édité réapplique tout de suite le tableau comme
+            # configuration active. blockSignals(True) pendant _populate_table
+            # empêche déjà ce signal de se déclencher pendant un chargement
+            # programmatique (Ouvrir/Réinitialiser) — seules les vraies
+            # éditions interactives arrivent ici.
+            self._auto_apply_active_config(self._collect_flags_from_table())
 
     def _on_delete_row(self, delete_btn: QPushButton) -> None:
         # Recherche par identité du widget (pas un index capturé à la
@@ -888,6 +992,11 @@ class FastFlagsPage(BasePage):
             container = self.table.cellWidget(row, COL_DELETE)
             if container is not None and container.layout().itemAt(0).widget() is delete_btn:
                 self.table.removeRow(row)
+                # removeRow() n'émet PAS itemChanged (suppression
+                # structurelle, pas une modification de donnée d'item) :
+                # contrairement à une édition de cellule, cette réapplication
+                # doit donc être déclenchée manuellement ici.
+                self._auto_apply_active_config(self._collect_flags_from_table())
                 return
 
     def _on_add_row(self) -> None:
@@ -1074,7 +1183,14 @@ class FastFlagsPage(BasePage):
         item = self.library_list.currentItem()
         if item is None:
             return
-        self._populate_table(self._resolve_item_flags(item))
+        flags = self._resolve_item_flags(item)
+        self._populate_table(flags)
+        # Voir "MÉCANISME PRINCIPAL" dans la docstring du module : ouvrir un
+        # preset le rend tout de suite actif, pas seulement affiché dans le
+        # tableau — _populate_table() bloque itemChanged pendant le
+        # chargement (voir sa docstring), donc cet appel explicite est
+        # nécessaire ici, rien ne le déclenche automatiquement.
+        self._auto_apply_active_config(flags)
 
     def _on_export_clicked(self) -> None:
         item = self.library_list.currentItem()
@@ -1125,13 +1241,12 @@ class FastFlagsPage(BasePage):
         if path is None:
             show_warning(self, t("page.fastflags.title"), t("page.fastflags.save_preset_error"))
             return
-        # Devient aussi la configuration ACTIVE : depuis le retrait de
-        # "Lancer Roblox" (qui écrivait ce même fichier auparavant, voir
-        # features/fastflags/launcher.py), "Enregistrer" est la seule
-        # action restante qui fait que CE tableau est bien ce que le
-        # protocole roblox-player:// réappliquera au PROCHAIN vrai
-        # lancement de Roblox — décision explicite (lier ça à "Enregistrer"
-        # plutôt qu'un auto-apply à chaque frappe).
+        # Bonus seulement désormais (voir "MÉCANISME PRINCIPAL" dans la
+        # docstring du module) : le tableau est déjà appliqué en continu via
+        # _auto_apply_active_config (édition, ajout/suppression de ligne,
+        # ouverture d'un preset) — "Enregistrer" garde juste la config
+        # active à jour pour le bonus protocole (launch_roblox()), sans plus
+        # jamais toucher directement au vrai fichier lui-même ici.
         export_flags_file(flags, get_fastflags_active_config_path())
         self._refresh_library()
         show_info(

@@ -18,6 +18,28 @@ from core.i18n import set_language
 
 
 def main() -> int:
+    # DIAGNOSTIC TEMPORAIRE (à retirer une fois le problème d'interception
+    # roblox-player:// confirmé/résolu) : log de tout premier niveau, écrit
+    # dans un fichier FIXE indépendant du logger normal (setup_logging()
+    # n'est même pas encore appelé à ce stade de main()) — sert uniquement à
+    # vérifier si Windows invoque ne serait-ce que cette app quand on clique
+    # "Jouer" sur roblox.com. Si ce fichier n'apparaît/ne grandit JAMAIS
+    # après un tel clic : le problème est entièrement en amont du code
+    # Python (Windows n'utilise pas notre gestionnaire du tout — voir le
+    # piège "UserChoice" documenté dans features/fastflags/protocol.py),
+    # jamais dans launch_roblox() lui-même. try/except autour de l'écriture
+    # : ce diagnostic ne doit JAMAIS empêcher un vrai lancement de démarrer,
+    # même si le fichier est inaccessible pour une raison quelconque.
+    try:
+        import datetime
+        _debug_log_path = os.path.join(
+            os.environ.get("TEMP", os.path.expanduser("~")), "zenkai_invoke_debug.log"
+        )
+        with open(_debug_log_path, "a", encoding="utf-8") as _f:
+            _f.write(f"{datetime.datetime.now().isoformat()} invoked, sys.argv={sys.argv!r}\n")
+    except Exception:
+        pass
+
     # Lancement intercepté via le protocole roblox-player:// (voir
     # features/fastflags/protocol.py) : Windows invoque cette app avec l'URI
     # d'origine en argument, à chaque clic sur "Jouer" sur le site Roblox ou

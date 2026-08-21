@@ -1,5 +1,5 @@
 {
-  "activate_url": "https://REMPLACE-PAR-TON-WORKER.workers.dev/activate",
+  "activate_url": "https://zenkai-license-relay.blondbrutal.workers.dev/activate",
   "grace_days": 3,
   "network_timeout_seconds": 3
 }

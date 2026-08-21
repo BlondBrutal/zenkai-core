@@ -12,6 +12,11 @@ __pycache__/
 *.pyo
 build/
 dist/
+# ZenkaiCore.spec est un .spec ECRIT A LA MAIN (empaquetage PyInstaller,
+# voir CLAUDE.md) et versionné volontairement — seule exception à
+# l'exclusion générale des .spec (qui vise les fichiers auto-générés
+# jetables d'un `pyinstaller main.py` lancé sans .spec dédié).
 *.spec
+!ZenkaiCore.spec
 .venv/
 venv/

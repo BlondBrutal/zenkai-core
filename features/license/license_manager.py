@@ -30,6 +30,13 @@ from features.license.license_store import LicenseData, clear_license, load_lice
 logger = logging.getLogger("zenkaiontop.license")
 
 KEY_FORMAT_RE = re.compile(r"^ZK-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
+# Valeur par défaut de config/license_config.json::activate_url tant que le
+# Worker Cloudflare réel n'a pas été déployé/configuré (voir CLAUDE.md,
+# section licence) — jamais un domaine qui existe : toute requête dessus
+# échoue par résolution DNS (getaddrinfo ENOTFOUND), pas un vrai problème
+# réseau. Détecté explicitement ci-dessous pour donner un diagnostic clair
+# au lieu d'un "injoignable" générique indiscernable d'un vrai souci réseau.
+_PLACEHOLDER_URL_MARKER = "REMPLACE-PAR-TON-WORKER"
 
 
 class LicenseStatus(Enum):
@@ -48,6 +55,14 @@ class LicenseCheckResult:
     status: LicenseStatus
     nom: Optional[str] = None
     days_left: Optional[int] = None
+    # DIAGNOSTIC TEMPORAIRE (voir conversation associée — message générique
+    # "Impossible de contacter le serveur de licences" affiché alors que le
+    # Worker semblait joignable) : texte complet de l'exception réelle
+    # levée par requests.post(), affiché à la place du message générique
+    # par page_license.py::_build_status_message tant que ce champ est
+    # rempli. À retirer (ici ET dans _build_status_message) une fois la
+    # vraie cause identifiée et corrigée.
+    error_detail: Optional[str] = None
 
 
 def _mask_key(key: str) -> str:
@@ -96,6 +111,23 @@ def check_key_online(key: str) -> LicenseCheckResult:
         logger.error("Aucune activate_url configurée dans config/license_config.json")
         return LicenseCheckResult(LicenseStatus.REGISTRY_ERROR)
 
+    if _PLACEHOLDER_URL_MARKER in url:
+        # Diagnostic distinct AVANT même de tenter la requête : ce domaine
+        # n'a jamais existé (voir _PLACEHOLDER_URL_MARKER ci-dessus) — sans
+        # ce court-circuit, l'échec réseau ci-dessous (ConnectionError par
+        # résolution DNS) était logué en warning générique, indiscernable
+        # d'un vrai souci réseau/pare-feu/SSL alors que la cause réelle est
+        # juste "le Worker Cloudflare n'a jamais été déployé/configuré".
+        logger.error(
+            "activate_url est ENCORE le placeholder par défaut (%s) — le Worker Cloudflare n'a "
+            "jamais été déployé/configuré (voir CLAUDE.md, section licence). Aucune requête "
+            "réseau tentée, ce n'est pas un problème de connexion.",
+            url,
+        )
+        if local and local.get("key") == key:
+            return _check_offline_grace(local)
+        return LicenseCheckResult(LicenseStatus.REGISTRY_ERROR)
+
     try:
         timeout = float(cfg.get("network_timeout_seconds", 3))
         response = requests.post(
@@ -106,10 +138,19 @@ def check_key_online(key: str) -> LicenseCheckResult:
         if not isinstance(payload, dict) or "status" not in payload:
             raise ValueError("réponse du Worker d'activation mal formée")
     except Exception as exc:
-        logger.warning("Worker d'activation injoignable (%s) pour la clé %s", exc, _mask_key(key))
+        # type(exc).__name__ en plus du message : pour un ConnectionError
+        # englobant une erreur DNS/SSL/refus de connexion, str(exc) seul
+        # noie parfois la cause réelle dans un message urllib3 très long —
+        # le nom de la classe d'exception isole tout de suite la CATÉGORIE
+        # du problème (DNS/timeout/SSL/HTTP...) en un coup d'œil dans le log.
+        error_detail = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "Worker d'activation injoignable pour la clé %s — %s (url=%s, timeout=%ss)",
+            _mask_key(key), error_detail, url, cfg.get("network_timeout_seconds", 3),
+        )
         if local and local.get("key") == key:
             return _check_offline_grace(local)
-        return LicenseCheckResult(LicenseStatus.REGISTRY_ERROR)
+        return LicenseCheckResult(LicenseStatus.REGISTRY_ERROR, error_detail=error_detail)
 
     status = payload.get("status")
 

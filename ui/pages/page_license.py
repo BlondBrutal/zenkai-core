@@ -9,6 +9,8 @@ run_startup_check() une fois le signal license_validated connecté, pour être
 certain de ne rater aucun état (le thread réseau ne doit jamais émettre dans
 le vide).
 """
+import logging
+
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
 
@@ -18,6 +20,8 @@ from features.license.license_manager import LicenseCheckWorker, LicenseStatus, 
 from features.license.license_store import clear_license, load_license
 from ui.pages.base_page import BasePage
 from ui.status_colors import STATUS_CRITICAL, STATUS_NEUTRAL, STATUS_OK, STATUS_WARNING
+
+logger = logging.getLogger("zenkaiontop.license.page")
 
 _UNLOCKED_STATUSES = {LicenseStatus.VALID, LicenseStatus.VALID_OFFLINE_GRACE}
 _KEY_MAX_LENGTH = len("ZK-XXXX-XXXX-XXXX")
@@ -91,7 +95,14 @@ class LicensePage(BasePage):
         buttons_row = QHBoxLayout()
         self.recheck_btn = QPushButton(t("page.license.recheck_btn"))
         self.recheck_btn.setProperty("class", "secondaryButton")
-        self.recheck_btn.clicked.connect(self._start_saved_check)
+        print("[ZK-DEBUG] page_license.py: connexion de recheck_btn.clicked en cours d'exécution")
+        # DIAGNOSTIC TEMPORAIRE : print() directement dans le lambda connecté
+        # au signal, séparé de _start_saved_check() elle-même — si CE print
+        # n'apparaît jamais au clic, le problème est la connexion du signal
+        # (ou un widget qui intercepte le clic avant lui), pas la méthode.
+        self.recheck_btn.clicked.connect(
+            lambda: (print("[ZK-DEBUG] recheck_btn.clicked REÇU"), self._start_saved_check())
+        )
         buttons_row.addWidget(self.recheck_btn)
 
         self.change_key_btn = QPushButton(t("page.license.change_key_btn"))
@@ -162,7 +173,13 @@ class LicensePage(BasePage):
         self.error_label.setText(t("page.license.checking"))
         self.activate_btn.setEnabled(False)
 
-        worker = LicenseCheckWorker(key=key)
+        # parent=self : rattache le QThread au cycle de vie de cette page
+        # (voir shutdown() plus bas) — sans parent Qt, seule la référence
+        # Python self._worker le maintenait en vie ; un ré-écrasement de cet
+        # attribut ailleurs aurait pu le faire garbage-collecter PENDANT
+        # qu'il tourne encore (crash natif "QThread: Destroyed while thread
+        # is still running", voir CLAUDE.md pour un précédent similaire).
+        worker = LicenseCheckWorker(key=key, parent=self)
         worker.finished_check.connect(self._on_activation_finished)
         self._worker = worker
         worker.start()
@@ -187,13 +204,32 @@ class LicensePage(BasePage):
     # Vérification de la clé déjà enregistrée (démarrage + bouton Revérifier)
     # ------------------------------------------------------------------
     def _start_saved_check(self) -> None:
-        self.recheck_btn.setEnabled(False)
-        self._set_status_text(t("page.license.checking"))
+        # DIAGNOSTIC (voir conversation associée — bouton "Revérifier"
+        # semblait ne rien faire) : confirme que le signal clicked est bien
+        # reçu, AVANT toute autre instruction qui pourrait lever. print()
+        # en plus du logger (visible même si le logging est mal configuré,
+        # voir demande explicite).
+        print("[ZK-DEBUG] _start_saved_check: ENTRÉE DANS LA MÉTHODE")
+        logger.info("_start_saved_check: appelée (clic Revérifier ou check au démarrage)")
+        try:
+            self.recheck_btn.setEnabled(False)
+            self._set_status_text(t("page.license.checking"))
 
-        worker = LicenseCheckWorker(key=None)
-        worker.finished_check.connect(self._on_saved_check_finished)
-        self._worker = worker
-        worker.start()
+            # parent=self : voir le commentaire équivalent dans
+            # _on_activate_clicked ci-dessus, même raisonnement.
+            worker = LicenseCheckWorker(key=None, parent=self)
+            worker.finished_check.connect(self._on_saved_check_finished)
+            self._worker = worker
+            worker.start()
+            logger.info("_start_saved_check: worker.start() exécuté sans exception")
+        except Exception:
+            # Ne doit JAMAIS laisser le bouton bloqué indéfiniment sur une
+            # exception inattendue ici (voir _on_saved_check_finished, seul
+            # autre endroit qui le réactive normalement) — sans ce filet,
+            # une exception synchrone laisserait le bouton désactivé pour
+            # toujours, exactement le symptôme "ne fait plus rien au clic".
+            logger.exception("_start_saved_check: exception AVANT/PENDANT worker.start()")
+            self.recheck_btn.setEnabled(True)
 
     def shutdown(self) -> None:
         """Arrêt INCONDITIONNEL et SYNCHRONE de la vérification réseau en
@@ -206,6 +242,14 @@ class LicensePage(BasePage):
             self._worker.wait(2000)
 
     def _on_saved_check_finished(self, result) -> None:
+        # DIAGNOSTIC (voir _start_saved_check) : confirme que le worker est
+        # bien allé au bout et ce que check_saved_license() a réellement
+        # renvoyé — si ce log n'apparaît JAMAIS après le précédent, le
+        # worker/QThread n'a pas terminé (ou n'a jamais démarré).
+        logger.info(
+            "_on_saved_check_finished: statut=%s nom=%r days_left=%r",
+            result.status, result.nom, result.days_left,
+        )
         self.recheck_btn.setEnabled(True)
 
         if result.status == LicenseStatus.NO_KEY:
@@ -241,7 +285,15 @@ class LicensePage(BasePage):
             return t("page.license.status_already_used")
         if result.status == LicenseStatus.OFFLINE_EXPIRED:
             return t("page.license.status_offline_expired")
-        return t("page.license.status_registry_error")
+        # DIAGNOSTIC TEMPORAIRE (voir LicenseCheckResult.error_detail) :
+        # affiche l'exception RÉELLE au lieu du message générique tant
+        # qu'elle est disponible — à retirer une fois la vraie cause de
+        # "Impossible de contacter le serveur de licences" confirmée et
+        # corrigée (remettre alors juste `return t(...)` ci-dessous).
+        base = t("page.license.status_registry_error")
+        if getattr(result, "error_detail", None):
+            return f"{base}\n[DEBUG] {result.error_detail}"
+        return base
 
     def _contact_hint_text(self) -> str:
         url = load_json_config("community_links.json").get("discord_url", "")

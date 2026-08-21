@@ -133,17 +133,25 @@ class _ConfirmDialog(QDialog):
         layout.addWidget(message_label)
 
         button_row = QHBoxLayout()
+        # setSpacing(10) : même écart que les autres paires de boutons de
+        # l'app (ex: Enregistrer/Réinitialiser, page_custom_script.py) — un
+        # QHBoxLayout nu sans setSpacing() explicite retombe sur l'espacement
+        # par défaut de Qt (~6px), plus resserré que la convention établie.
+        button_row.setSpacing(10)
         button_row.addStretch(1)
-        cancel_btn = QPushButton(cancel_label)
-        cancel_btn.setProperty("class", "secondaryButton")
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
-        button_row.addWidget(cancel_btn)
+        # Confirmer/Activer en premier (donc à gauche) : même ordre que les
+        # autres paires de boutons de l'app (action principale à gauche,
+        # ex: Enregistrer avant Réinitialiser) — Annuler ensuite (à droite).
         confirm_btn = QPushButton(confirm_label)
         confirm_btn.setProperty("class", "secondaryButton")
         confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         confirm_btn.clicked.connect(self.accept)
         button_row.addWidget(confirm_btn)
+        cancel_btn = QPushButton(cancel_label)
+        cancel_btn.setProperty("class", "secondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
         layout.addLayout(button_row)
 
 
@@ -279,12 +287,10 @@ class _HighRiskConfirmDialog(QDialog):
         layout.addWidget(self.ack_checkbox)
 
         button_row = QHBoxLayout()
+        # Même écart (10px) et même ordre (confirmer à gauche, annuler à
+        # droite) que _ConfirmDialog ci-dessus — voir son commentaire.
+        button_row.setSpacing(10)
         button_row.addStretch(1)
-        cancel_btn = QPushButton(cancel_label)
-        cancel_btn.setProperty("class", "secondaryButton")
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
-        button_row.addWidget(cancel_btn)
 
         self.confirm_btn = QPushButton(confirm_label)
         self.confirm_btn.setProperty("class", "secondaryButton")
@@ -304,6 +310,11 @@ class _HighRiskConfirmDialog(QDialog):
         )
         self.confirm_btn.clicked.connect(self.accept)
         button_row.addWidget(self.confirm_btn)
+        cancel_btn = QPushButton(cancel_label)
+        cancel_btn.setProperty("class", "secondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
         layout.addLayout(button_row)
 
     def _update_confirm_enabled(self, _state) -> None:
@@ -363,12 +374,10 @@ class _TextPromptDialog(QDialog):
         layout.addWidget(self.input)
 
         button_row = QHBoxLayout()
+        # Même écart (10px) et même ordre (confirmer à gauche, annuler à
+        # droite) que _ConfirmDialog plus haut — voir son commentaire.
+        button_row.setSpacing(10)
         button_row.addStretch(1)
-        cancel_btn = QPushButton(cancel_label)
-        cancel_btn.setProperty("class", "secondaryButton")
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
-        button_row.addWidget(cancel_btn)
 
         self.confirm_btn = QPushButton(confirm_label)
         self.confirm_btn.setProperty("class", "secondaryButton")
@@ -376,6 +385,11 @@ class _TextPromptDialog(QDialog):
         self.confirm_btn.setEnabled(False)
         self.confirm_btn.clicked.connect(self.accept)
         button_row.addWidget(self.confirm_btn)
+        cancel_btn = QPushButton(cancel_label)
+        cancel_btn.setProperty("class", "secondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        button_row.addWidget(cancel_btn)
         layout.addLayout(button_row)
 
         self.input.setFocus()

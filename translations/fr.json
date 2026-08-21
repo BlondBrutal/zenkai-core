@@ -280,6 +280,7 @@
   "page.fastflags.reset_success": "Réglages par défaut restaurés. Redémarre Roblox pour qu'ils soient pris en compte.",
   "page.fastflags.protocol_register_error": "Impossible d'activer l'interception (accès au registre refusé).",
   "page.fastflags.protocol_unregister_error": "Impossible de désactiver l'interception.",
+  "page.fastflags.protocol_user_choice_conflict": "Windows utilise déjà un AUTRE gestionnaire pour les liens roblox-player:// (un choix déjà mémorisé, probablement fait avant l'installation de Zenkai Core) : l'interception ne fonctionnera pas tant que ce choix n'est pas refait. Relance Roblox depuis le navigateur : si une fenêtre \"Comment voulez-vous ouvrir ceci ?\" apparaît, choisis Zenkai Core (et coche \"Toujours utiliser cette application\"). Si aucune fenêtre n'apparaît, va dans Paramètres Windows > Applications > Applications par défaut, recherche \"roblox-player\" et choisis Zenkai Core manuellement.",
   "page.fastflags.search_placeholder": "Rechercher un flag...",
   "page.fastflags.add_row_btn": "Ajouter",
   "page.fastflags.browse_known_btn": "Parcourir",

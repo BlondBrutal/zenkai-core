@@ -112,7 +112,14 @@ class Sidebar(QWidget):
 
         self.settings_button = QPushButton(t("nav.settings"))
         self.settings_button.setObjectName("settingsButton")
-        self.settings_button.setFixedHeight(36)
+        # 38px (pas 36) : mesuré via QFontMetrics (audit du texte coupé sur
+        # les boutons, voir CLAUDE.md/design system) — à 36px, la hauteur de
+        # contenu réellement disponible (36 - 2*10px de padding vertical)
+        # était 1px plus courte que la hauteur réelle de la police à 13px
+        # (17px, descendantes g/j/p/q/y comprises), un déficit qui rogne le
+        # bas du texte. 38px est la hauteur naturelle que Qt calcule lui-même
+        # pour ce bouton (sizeHint()) — la valeur sûre par construction.
+        self.settings_button.setFixedHeight(38)
         self.settings_button.clicked.connect(lambda: self.page_requested.emit("settings"))
         layout.addWidget(self.settings_button)
 

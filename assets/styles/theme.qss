@@ -8,12 +8,18 @@ QMainWindow, QWidget#centralWidget {
     background-color: #1A1A1F;
 }
 
-/* Tooltip Qt sobre (badges "?", etc.) : texte gris standard sur fond
-   discret, pas d'encadré coloré ni d'accent — un tooltip normal, rien de plus. */
+/* Tooltip Qt natif (icône poubelle, en-tête de colonne, etc. — tout ce qui
+   utilise setToolTip() au lieu de la bulle maison InfoBadge/ui/info_badge.py) :
+   même rayon (5px, voir ui/scrollbar_style.py::CONTENT_SCROLLBAR_GAP et la
+   bulle d'InfoBadge) que le reste du design system, pour ne pas trancher avec
+   un coin carré à côté d'une bulle d'info arrondie juste à côté. Sans ce
+   border-radius, Qt/Windows dessine un rectangle à coins vifs — c'était le
+   "fond en rectangle noir moche" signalé sur le tooltip de l'icône poubelle. */
 QToolTip {
     background-color: #26262E;
     color: #C7CBD3;
     border: 1px solid #33333C;
+    border-radius: 5px;
     padding: 4px 8px;
     font-size: 12px;
 }
@@ -135,15 +141,23 @@ QPushButton.neutralButton:hover {
     background-color: #26262E;
 }
 
-/* Variante de .neutralButton pour KeyCaptureWidget (champ "Activer") : ce
-   widget a une hauteur FIXE (32px, voir _FIELD_HEIGHT dans
-   macro_simple_tab.py/macro_pixel_tab.py), alors que le padding vertical
-   généreux de .neutralButton (10px 10px) est pensé pour un bouton qui peut
-   grandir librement — combiné à une hauteur figée, il ne laissait plus assez
-   de place verticalement au texte, tronquant le haut des lettres (un "G"
-   capturé ressemblait par ex. à un "a"). Padding vertical réduit ici,
-   horizontal inchangé. */
-QPushButton.hotkeyCaptureButton {
+/* Variante de .neutralButton pour tout bouton QSS à hauteur FIXE et compacte
+   (champ "Activer" de KeyCaptureWidget, dropdown "Mode" de StyledDropdown —
+   voir key_capture_widget.py/styled_dropdown.py) : ces widgets vivent à une
+   hauteur FIXE (32-34px), alors que le padding vertical généreux de
+   .neutralButton (10px 10px) est pensé pour un bouton à hauteur LIBRE, où Qt
+   calcule lui-même la hauteur nécessaire (padding + border + hauteur réelle
+   de la police, descendantes g/j/p/q/y comprises) — combiné à une hauteur
+   figée plus petite que ce calcul naturel, ce padding ne laissait plus assez
+   de place verticalement au texte, tronquant soit le haut (un "G" capturé
+   ressemblait par ex. à un "a"), soit le bas (descendantes rognées, ex. le
+   dropdown "Mode" avec .neutralButton à 32-34px de haut). Voir CLAUDE.md,
+   section design system, pour la règle générale (vérifier
+   QFontMetrics(police).height() contre la hauteur de contenu réellement
+   disponible) avant d'imposer une hauteur fixe à un nouveau bouton QSS.
+   Padding vertical réduit ici, horizontal inchangé — mêmes couleurs/bordure
+   que .neutralButton, seul le nom de classe change pour ce cas précis. */
+QPushButton.compactNeutralButton {
     background-color: #202027;
     color: #9BA1AB;
     border: 1px solid #33333C;
@@ -153,7 +167,7 @@ QPushButton.hotkeyCaptureButton {
     font-weight: 600;
 }
 
-QPushButton.hotkeyCaptureButton:hover {
+QPushButton.compactNeutralButton:hover {
     border: 1px solid #45454F;
     background-color: #26262E;
 }

@@ -8,3 +8,4 @@ WMI>=1.5
 GPUtil>=1.4
 requests>=2.31
 pyinstaller>=6.3
+pyinstaller-hooks-contrib>=2024.0

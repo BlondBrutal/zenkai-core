@@ -402,6 +402,51 @@ rendu au montage dynamique) :
   (`STATUS_CRITICAL`) — action destructive, sans faire ressortir le
   bouton au repos.
 
+**Texte coupé (descendantes g/j/p/q/y rognées) sur un bouton à hauteur
+FIXE** : jamais corriger au cas par cas "à l'œil" — un bouton QSS
+(`QPushButton` + classe `.xxxButton`) à hauteur LIBRE (pas de
+`setFixedHeight`/`setFixedSize`) est TOUJOURS sûr par construction : Qt
+calcule lui-même `sizeHint()` à partir de la vraie hauteur de police
+(`QFontMetrics(police).height()`, qui réserve déjà tout l'espace
+nécessaire aux descendantes) plus le padding/la bordure QSS. Le risque
+n'apparaît QUE quand une hauteur fixe plus PETITE que ce calcul naturel
+est imposée par-dessus (`setFixedHeight`/`setFixedSize` sur le bouton, ou
+une ligne de tableau/`setRowHeight` trop juste pour un widget de cellule) :
+avant d'imposer une hauteur fixe à un bouton texte (nouveau ou existant),
+vérifier par un petit script Qt hors-ligne (`QFontMetrics(bouton.font()).height()`
+contre la hauteur de contenu réellement disponible = hauteur fixe moins
+2×bordure moins padding haut+bas) plutôt que de juger au rendu à l'œil —
+un déficit de ne serait-ce qu'1px rogne déjà le texte. Trouvé et corrigé une
+première fois (bouton `KeyCaptureWidget`, voir `.compactNeutralButton`
+ci-dessous), puis RETROUVÉ ailleurs lors d'un audit complet de tous les
+boutons de l'app (2026-08-21) — preuve que le cas par cas ne suffit pas :
+- `ui/styled_dropdown.py::StyledDropdown` (dropdown "Mode") utilisait la
+  classe `.neutralButton` (padding vertical 10px, pensé pour une hauteur
+  libre) alors qu'il vit TOUJOURS à une hauteur fixe compacte (32px dans
+  `macro_simple_tab.py`, 34px dans `page_fleasion.py`) — texte rogné en
+  bas. Bascule sur `.compactNeutralButton` (theme.qss), la même variante à
+  padding réduit (4px) déjà créée pour `KeyCaptureWidget` — nom généralisé
+  (l'ancien nom `.hotkeyCaptureButton` ne convenait plus, réutilisée par un
+  widget qui n'a rien à voir avec la capture de touche).
+- `ui/sidebar.py::Sidebar` — `settings_button.setFixedHeight(36)` : 36px
+  moins 2×10px de padding = 16px de contenu disponible, alors que la police
+  13px de `#settingsButton` a besoin de 17px réels (`QFontMetrics.height()`)
+  — déficit d'1px. Remplacé par `38px`, la hauteur naturelle que Qt calcule
+  lui-même pour ce bouton (`sizeHint()`) — toujours préférer cette valeur
+  mesurée à un chiffre rond deviné.
+- Vérifiés SANS problème lors du même audit (déjà assez de marge) :
+  `.primaryButton`/`.secondaryButton`/`.neutralButton`/`.navButton`/
+  `.tableCellButton` à leurs hauteurs actuelles, toutes les tailles
+  `AnimatedButton` réellement utilisées dans l'app (même la plus petite,
+  `browse_btn` de Fleasion à 26px/police 11px).
+
+**Boutons dans une cellule de tableau/ligne à hauteur fixe** (même
+principe que ci-dessus, ex. `ActionCaptureWidget`/`.tableCellButton` dans
+`macro_simple_tab.py`, `_CELL_HEIGHT`) : la hauteur de LIGNE (`setRowHeight`/
+`_ROW_HEIGHT`) joue exactement le même rôle qu'un `setFixedHeight` direct
+sur le bouton — même vérification à faire, pas seulement sur la hauteur du
+widget lui-même.
+
 **Tableaux/listes** : jamais de fond plein au clic/sélection/survol
 (`QTableWidget::item:selected { background-color: transparent; }`) — seule
 la couleur du curseur de texte ou un léger halo turquoise
@@ -465,3 +510,92 @@ recopiée page par page) :
 Quand une nouvelle préférence visuelle récurrente émerge en cours de
 projet (ex: comportement de clic, style d'un nouveau type de composant),
 l'ajouter ici plutôt que de la re-décider à chaque nouvelle page.
+
+## Empaquetage (PyInstaller)
+
+`ZenkaiCore.spec` (racine du dépôt, écrit à la main — voir l'exception
+dédiée dans `.gitignore`, la règle générale `*.spec` visant les fichiers
+auto-générés jetables d'un `pyinstaller main.py` lancé sans .spec) construit
+un exécutable Windows autonome à partir de `main.py`.
+
+**Build** : `pyinstaller ZenkaiCore.spec --noconfirm --clean` depuis la
+racine du dépôt (nécessite `pyinstaller`+`pyinstaller-hooks-contrib`, tous
+deux dans `requirements.txt`). Résultat dans `dist/ZenkaiCore/` (dossier
+`build/`/`dist/` déjà gitignorés, jamais committés).
+
+**Mode "onedir", pas "onefile"** — choix déterminant pour CETTE app
+précisément, pas une préférence générique :
+- L'app se relance elle-même en admin à CHAQUE démarrage
+  (`core/elevation.py::relaunch_as_admin`, voir sa docstring). Un
+  "onefile" ré-extrairait tout le bundle (runtime Python + Qt6 + tous les
+  binaires embarqués : AutoHotkey64/32.exe, PresentMon, un jour Fleasion)
+  dans un dossier temporaire À CHAQUE lancement — et donc DEUX FOIS de
+  suite à chaque démarrage normal (une fois pour le process non élevé,
+  une deuxième fois pour le process élevé qui le relance), avec le délai
+  d'extraction correspondant.
+- Un exécutable "onefile" auto-extractible est aussi plus systématiquement
+  signalé par les antivirus/Windows Defender (technique de packing
+  courante chez les malwares) qu'un dossier "onedir" classique.
+- Contrepartie assumée : distribuer un dossier plutôt qu'un fichier unique
+  — zippé pour la distribution (`dist/ZenkaiCore/` → `.zip`), ce qui reste
+  la pratique standard de toute façon.
+
+**Ressources embarquées** (`datas` du .spec) : `assets/`, `vendor/presentmon/`,
+`config/`, `translations/`, `CHANGELOG.json` — copiés TELS QUELS, à la même
+profondeur relative qu'en dev. Nécessaire car tous les modules qui lisent
+ces dossiers (`ahk_detect.py`, `fleasion_detect.py`, `fps_monitor.py`,
+`fastflags/manager.py`, `core/static_config.py`, `core/i18n.py`,
+`core/changelog.py`, `ui/sidebar.py`, `ui/main_window.py`, `ui/tray.py`,
+`ui/splash.py`) recalculent leur chemin depuis leur propre `__file__`
+jusqu'à la racine du bundle (`sys._MEIPASS`, qui pointe vers
+`dist/ZenkaiCore/_internal/` avec PyInstaller ≥ 6 en mode onedir) — le
+même mécanisme qu'en dev (racine = racine du dépôt), donc AUCUN code n'a eu
+besoin d'être modifié pour fonctionner une fois empaqueté. Si un nouveau
+module lit un fichier sous `assets/`/`vendor/`/`config/`/`translations/`,
+réutiliser cette même convention (`__file__`-relative, jamais un chemin
+relatif nu du genre `open("assets/...")` qui suppose un `cwd` précis) —
+sinon l'ajouter aussi aux `datas` du .spec.
+
+**Icône** : `assets/logo/logo.ico` (déjà présent dans le dépôt), posée à la
+fois sur l'`EXE()` du .spec (icône du fichier .exe) et déjà appliquée à la
+fenêtre elle-même au runtime (`main.py`, indépendant du build).
+
+**Pas de manifeste `requireAdministrator`** : l'app gère elle-même son
+élévation UAC au démarrage avec un repli explicite "continuer sans droits
+admin" si l'utilisateur refuse le prompt (voir `core/elevation.py`) — un
+manifeste forcé imposerait l'élévation au niveau Windows et casserait ce
+choix. Ne jamais ajouter `uac_admin=True` (ou un manifeste XML équivalent)
+à l'`EXE()` du .spec sans relire cette note.
+
+**Piège pywin32 déjà rencontré** : `win32timezone` doit être listé
+explicitement dans `hiddenimports` du .spec. Jamais importé nulle part
+dans notre propre code, mais requis en coulisses par pywin32 dès qu'une
+propriété COM de type DATE est convertie (`import wmi` dans
+`features/performance/system_info.py`, `Schedule.Service` dans
+`features/custom_script/deelevate.py`) — PyInstaller ne le détecte pas
+tout seul (jamais un `import win32timezone` littéral dans le code de
+pywin32 lui-même, chargé dynamiquement). Sans cette ligne, l'erreur
+n'apparaît qu'à l'usage réel (première requête WMI ou premier lancement
+dé-élevé), jamais au moment du build — si une erreur `ModuleNotFoundError`
+similaire apparaît un jour pour un autre module jamais importé
+explicitement, le réflexe est le même : l'ajouter à `hiddenimports`
+plutôt que de chercher un `import` manquant dans notre propre code.
+
+**Vérification faite lors de la mise en place** (build réel, testé sur
+cette machine) : build via la commande ci-dessus (aucune erreur, warnings
+non bloquants uniquement — dépendances optionnelles Linux/macOS de
+`pynput`, `pywin32.gen_py`...) ; toutes les ressources confirmées présentes
+dans `dist/ZenkaiCore/_internal/` ; le dossier `dist/ZenkaiCore/` copié
+HORS du dépôt (`%TEMP%`) puis l'exe lancé depuis là — log applicatif
+(`%APPDATA%\ZenkaiCore\logs\zenkaiontop.log`) confirmant un démarrage
+complet (élévation, chargement des traductions/du thème, construction de
+TOUTES les pages y compris Fleasion/Custom Script/Performance, vérification
+de licence réseau réelle exécutée sur son thread dédié), fenêtre "Zenkai
+Core" visible et réactive (`Get-Process` : `Responding = True`). Le process
+s'est avéré tourner à un niveau d'intégrité supérieur à celui du terminal
+de build (élévation UAC réussie sans invite visible — probablement une
+politique locale "élever sans invite" déjà configurée sur cette machine) :
+confirmation supplémentaire que le chemin élevé fonctionne aussi, mais pas
+un test représentatif du VRAI prompt UAC interactif (impossible à cliquer
+depuis un terminal automatisé) — à confirmer une fois par un double-clic
+manuel sur une machine avec le prompt UAC standard actif.

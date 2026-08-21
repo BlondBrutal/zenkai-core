@@ -15,7 +15,7 @@ from core.i18n import t
 from features.macro_pixel.key_names import qt_key_to_pydirectinput, qt_mouse_button_to_name
 
 _LISTENING_STYLE = "QPushButton { color: #17B897; border-color: #17B897; }"
-# Padding horizontal total de .hotkeyCaptureButton (voir theme.qss : "padding:
+# Padding horizontal total de .compactNeutralButton (voir theme.qss : "padding:
 # 4px 18px") : à soustraire de la largeur du bouton pour élider le texte au
 # bon endroit plutôt que de laisser Qt le couper net sans "…" (QPushButton
 # n'élide jamais tout seul).
@@ -55,12 +55,12 @@ class KeyCaptureWidget(QPushButton):
 
     def __init__(self, initial_key: str = "", exclude_click_buttons: bool = False, parent=None):
         super().__init__(parent)
-        # .hotkeyCaptureButton (pas .neutralButton) : ce widget a toujours une
+        # .compactNeutralButton (pas .neutralButton) : ce widget a toujours une
         # hauteur FIXE (32px, voir _FIELD_HEIGHT dans macro_simple_tab.py/
         # macro_pixel_tab.py) — le padding vertical de .neutralButton, pensé
         # pour un bouton de hauteur libre, tronquait le haut du texte dans ce
         # cadre figé (voir theme.qss).
-        self.setProperty("class", "hotkeyCaptureButton")
+        self.setProperty("class", "compactNeutralButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # QPushButton a Qt.ContextMenuPolicy.DefaultContextMenu par défaut
         # (pas NoContextMenu, vérifié) : ce widget capture LUI-MÊME tous les

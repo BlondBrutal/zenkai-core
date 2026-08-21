@@ -280,6 +280,7 @@
   "page.fastflags.reset_success": "Default settings restored. Restart Roblox for it to take effect.",
   "page.fastflags.protocol_register_error": "Couldn't enable interception (registry access denied).",
   "page.fastflags.protocol_unregister_error": "Couldn't disable interception.",
+  "page.fastflags.protocol_user_choice_conflict": "Windows is already using a DIFFERENT handler for roblox-player:// links (a choice already remembered, likely made before Zenkai Core was installed): interception won't work until that choice is redone. Relaunch Roblox from your browser: if a \"How do you want to open this?\" window appears, pick Zenkai Core (and check \"Always use this app\"). If no window appears, go to Windows Settings > Apps > Default apps, search for \"roblox-player\" and pick Zenkai Core manually.",
   "page.fastflags.search_placeholder": "Search a flag...",
   "page.fastflags.add_row_btn": "Add",
   "page.fastflags.browse_known_btn": "Browse",
